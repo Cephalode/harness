@@ -4,6 +4,8 @@ import ActivityFeed from './components/ActivityFeed'
 import SystemDiagram from './components/SystemDiagram'
 import StatusBar from './components/StatusBar'
 import MessageInput from './components/MessageInput'
+import { useWebSocket } from './hooks/useWebSocket'
+import { useDashboardStore } from './store'
 import './App.css'
 
 type ViewTab = 'activity' | 'diagram'
@@ -11,6 +13,10 @@ type ViewTab = 'activity' | 'diagram'
 function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>('activity')
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const connected = useDashboardStore((s) => s.connected)
+
+  // Connect to WebSocket
+  useWebSocket()
 
   return (
     <div className="flex flex-col h-screen">
@@ -19,7 +25,7 @@ function App() {
               style={{ borderColor: 'var(--border)', background: 'var(--bg-sidebar)' }}>
         <div className="flex items-center gap-3">
           <button onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="text-gray-400 hover:text-white">
+                  className="text-gray-400 hover:text-white text-lg">
             ☰
           </button>
           <nav className="text-sm">
@@ -31,6 +37,9 @@ function App() {
           </nav>
         </div>
         <div className="flex items-center gap-2 text-sm">
+          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+          <span className="text-xs text-gray-500">{connected ? 'Live' : 'Disconnected'}</span>
+          <span className="mx-2 text-gray-700">|</span>
           <button
             onClick={() => setActiveTab('activity')}
             className={`px-3 py-1 rounded ${activeTab === 'activity' ? 'bg-blue-900 text-blue-300' : 'text-gray-500 hover:text-gray-300'}`}

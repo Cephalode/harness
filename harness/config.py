@@ -210,11 +210,13 @@ def validate_config(config: HarnessConfig) -> list[str]:
     if len(names) != len(set(names)):
         warnings.append("Duplicate agent names detected")
 
-    # Validate commands reference existing teams
-    team_names = set(config.teams) if isinstance(config.teams, dict) else {t.name for t in config.teams}
+    # Validate commands reference existing teams (including instance-expanded names)
+    base_names = {t.name for t in config.teams}
+    instance_names = {inst.name for t in config.teams for inst in t.instances}
+    all_team_names = base_names | instance_names
     for cmd_name, cmd in config.commands.items():
         for step in cmd.steps:
-            if step.team not in team_names:
+            if step.team not in all_team_names:
                 warnings.append(
                     f"Command '{cmd_name}' step references unknown team '{step.team}'"
                 )

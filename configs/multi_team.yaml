@@ -1,14 +1,18 @@
 # Multi-Team Agentic Coding Harness Configuration
 #
 # Runtime: PI coding agent (pi -p)
-# Models: Leave empty to use PI's default provider/model from ~/.pi/agent/settings.json
-#          Or specify with provider prefix: "z-ai/glm-5.1", "anthropic/claude-opus-4-6", etc.
+# Models: provider prefix format: "z-ai/glm-5.1", "opencode-go/qwen3.6-plus", etc.
+#          Leave empty to use PI's default provider/model
+#
+# Providers:
+#   z-ai        — 13 GLM models (glm-5.1 flagship, glm-4.7-flashx cheap, glm-4.7/4.5-flash FREE)
+#   opencode-go — 9 models (kimi-k2.5, minimax-m2.7, qwen3.6-plus, mimo-v2)
 #
 # Default PI config: provider=z-ai, model=glm-5.1
 
 orchestrator:
   name: orchestrator
-  model: ""
+  model: "z-ai/glm-5.1"
   system_prompt: agents/orchestrator.md
   expertise:
     - path: expertise/orchestrator.md
@@ -26,7 +30,10 @@ teams:
     color: blue
     lead:
       name: planning_lead
-      model: ""
+      model: "z-ai/glm-5.1"
+      fallback_models:
+        - "opencode-go/qwen3.6-plus"
+        - "z-ai/glm-4.7-flashx"
       system_prompt: agents/planning_lead.md
       expertise:
         - path: expertise/planning_lead.md
@@ -43,7 +50,9 @@ teams:
         update: ["expertise/", "specs/"]
     workers:
       - name: planner
-        model: ""
+        model: "z-ai/glm-4.7-flashx"
+        fallback_models:
+          - "opencode-go/minimax-m2.7"
         system_prompt: agents/planning_lead.md
         skills:
           - skills/active_listener.md
@@ -52,11 +61,28 @@ teams:
           read: ["."]
           update: ["expertise/"]
 
+  # ── Engineering team with A/B instances ──────────────────────────
+  # Team A (z-ai models) and Team B (opencode-go models) run in parallel
+  # when instances are expanded by the orchestrator.
   - name: engineering
     color: green
+    instances:
+      - name: engineering_A
+        models:
+          engineering_lead: "z-ai/glm-5.1"
+          frontend_dev: "z-ai/glm-4.7-flashx"
+          backend_dev: "z-ai/glm-4.7-flashx"
+      - name: engineering_B
+        models:
+          engineering_lead: "opencode-go/kimi-k2.5"
+          frontend_dev: "opencode-go/minimax-m2.7"
+          backend_dev: "opencode-go/qwen3.6-plus"
     lead:
       name: engineering_lead
-      model: ""
+      model: "z-ai/glm-5.1"        # default (overridden by instances)
+      fallback_models:
+        - "opencode-go/kimi-k2.5"
+        - "z-ai/glm-4.7-flashx"
       system_prompt: agents/engineering_lead.md
       expertise:
         - path: expertise/engineering_lead.md
@@ -76,13 +102,19 @@ teams:
         update: ["expertise/"]
     workers:
       - name: frontend_dev
-        model: ""
+        model: "z-ai/glm-4.7-flashx"  # default (overridden by instances)
+        fallback_models:
+          - "opencode-go/minimax-m2.7"
+          - "z-ai/glm-4.5-flash"     # FREE fallback
         system_prompt: agents/frontend_dev.md
         domain:
           read: ["."]
           update: ["frontend/", "src/components/", "src/styles/"]
       - name: backend_dev
-        model: ""
+        model: "z-ai/glm-4.7-flashx"  # default (overridden by instances)
+        fallback_models:
+          - "opencode-go/qwen3.6-plus"
+          - "z-ai/glm-4.5-flash"     # FREE fallback
         system_prompt: agents/backend_dev.md
         domain:
           read: ["."]
@@ -92,7 +124,10 @@ teams:
     color: red
     lead:
       name: validation_lead
-      model: ""
+      model: "z-ai/glm-5.1"
+      fallback_models:
+        - "opencode-go/qwen3.6-plus"
+        - "z-ai/glm-4.7-flashx"
       system_prompt: agents/validation_lead.md
       expertise:
         - path: expertise/validation_lead.md
@@ -109,14 +144,96 @@ teams:
         update: ["expertise/"]
     workers:
       - name: qa_engineer
-        model: ""
+        model: "z-ai/glm-4.7-flashx"
+        fallback_models:
+          - "opencode-go/mimo-v2-pro"
+          - "z-ai/glm-4.5-flash"     # FREE fallback
         system_prompt: agents/qa_engineer.md
         domain:
           read: ["."]
           update: ["tests/", "expertise/"]
       - name: security_reviewer
-        model: ""
+        model: "opencode-go/kimi-k2.5"
+        fallback_models:
+          - "z-ai/glm-4.7-flashx"
         system_prompt: agents/security_reviewer.md
         domain:
           read: ["."]
           update: ["expertise/"]
+
+# ── Reusable Command Workflows ────────────────────────────────────
+# Invoke with: <command_name>: <user input>
+# e.g. "plan-build-validate: add OAuth2 login flow"
+commands:
+  - name: plan-build-validate
+    description: "Plan a feature, implement it, then validate — full lifecycle"
+    steps:
+      - team: planning
+        prompt: "Create a detailed implementation plan for: {input}"
+      - team: engineering_A
+        prompt: |
+          Implement the following plan:
+
+          {prev_result}
+
+          Original request: {input}
+      - team: validation
+        prompt: |
+          Review and test the implementation of: {input}
+
+          Implementation summary:
+          {prev_result}
+
+          Check for bugs, missing tests, security issues, and code quality.
+
+  - name: plan
+    description: "Plan a feature without implementing — specs only"
+    steps:
+      - team: planning
+        prompt: "Create a detailed implementation plan for: {input}"
+
+  - name: build
+    description: "Send a task directly to engineering team A"
+    steps:
+      - team: engineering_A
+        prompt: "Implement the following: {input}"
+
+  - name: build-compete
+    description: "Run engineering teams A and B in parallel for competitive implementation"
+    steps:
+      - team: engineering_A
+        prompt: "Implement the following. You are Team A — focus on correctness and clean architecture: {input}"
+      - team: engineering_B
+        prompt: "Implement the following. You are Team B — focus on performance and elegant solutions: {input}"
+
+  - name: review
+    description: "Run validation team against a description of what was built"
+    steps:
+      - team: validation
+        prompt: "Review the following code change for bugs, security issues, and test coverage: {input}"
+
+  - name: full-pipeline
+    description: "Plan → competing implementations A+B → validate the best approach"
+    steps:
+      - team: planning
+        prompt: "Create a detailed implementation plan for: {input}"
+      - team: engineering_A
+        prompt: |
+          You are Team A. Implement this plan focusing on correctness and clean architecture:
+
+          {prev_result}
+
+          Original request: {input}
+      - team: engineering_B
+        prompt: |
+          You are Team B. Implement this plan focusing on performance and elegance:
+
+          {prev_result}
+
+          Original request: {input}
+      - team: validation
+        prompt: |
+          Review BOTH team implementations of: {input}
+
+          Team A result is from the previous step.
+          Compare the two approaches and recommend the best one, or suggest merging the best parts.

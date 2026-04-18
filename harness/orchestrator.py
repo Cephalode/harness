@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 
 from .agent import Agent
-from .config import HarnessConfig
+from .config import HarnessConfig, TeamConfig, TeamInstanceConfig
 from .delegate import DelegationTool
 from .models import CostTracker
 from .session import Session
@@ -36,19 +36,47 @@ class Orchestrator:
             session=self.session,
         )
 
-        # Create teams
+        # Create teams (expand instances into separate Team objects)
         self.teams: dict[str, Team] = {}
         for tcfg in config.teams:
-            team = Team(
-                config=tcfg,
-                cost_tracker=self.cost_tracker,
-                base_dir=self.base_dir,
-                session=self.session,
-            )
-            self.teams[tcfg.name] = team
+            if tcfg.instances:
+                for inst in tcfg.instances:
+                    team = self._create_team_instance(tcfg, inst)
+                    self.teams[inst.name] = team
+            else:
+                team = Team(
+                    config=tcfg,
+                    cost_tracker=self.cost_tracker,
+                    base_dir=self.base_dir,
+                    session=self.session,
+                )
+                self.teams[tcfg.name] = team
 
     def _resolve_path(self, relative: str) -> str:
         return f"{self.base_dir}/{relative}"
+
+    def _create_team_instance(
+        self, base_config: TeamConfig, instance: TeamInstanceConfig
+    ) -> Team:
+        """Create a Team from a base config with instance-specific overrides."""
+        import copy
+
+        cfg = copy.deepcopy(base_config)
+        cfg.name = instance.name
+        cfg.instances = []  # instances don't carry over to expanded teams
+        # Apply model overrides
+        overrides = instance.model_overrides
+        if cfg.lead and cfg.lead.name in overrides:
+            cfg.lead.model = overrides[cfg.lead.name]
+        for w in cfg.workers:
+            if w.name in overrides:
+                w.model = overrides[w.name]
+        return Team(
+            config=cfg,
+            cost_tracker=self.cost_tracker,
+            base_dir=self.base_dir,
+            session=self.session,
+        )
 
     async def process_message(self, user_message: str) -> str:
         """Process a user message through the orchestration pipeline.

@@ -255,10 +255,36 @@ def main() -> None:
         default="configs/multi_team.yaml",
         help="Path to config file (default: configs/multi_team.yaml)",
     )
+    parser.add_argument(
+        "-d", "--dashboard",
+        action="store_true",
+        help="Launch the web dashboard instead of the interactive CLI",
+    )
+    parser.add_argument(
+        "--host",
+        default="localhost",
+        help="Dashboard host (default: localhost)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=5173,
+        help="Dashboard port (default: 5173)",
+    )
     args = parser.parse_args()
 
-    cli = HarnessCLI(config_path=args.config)
-    cli.run()
+    if args.dashboard:
+        from .dashboard import run_dashboard
+        console.print(Panel(
+            f"[bold green]Harness Dashboard[/]\n"
+            f"Config: {args.config}\n"
+            f"URL:    http://{args.host}:{args.port}",
+            border_style="green",
+        ))
+        run_dashboard(config_path=args.config, host=args.host, port=args.port)
+    else:
+        cli = HarnessCLI(config_path=args.config)
+        cli.run()
 
 
 if __name__ == "__main__":

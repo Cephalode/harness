@@ -8,3 +8,5 @@ expertise/
 dist/
 build/
 .venv/
+dashboard/node_modules/
+dashboard/dist/

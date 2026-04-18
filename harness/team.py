@@ -9,6 +9,7 @@ from typing import Any
 from .agent import Agent
 from .config import TeamConfig
 from .delegate import DelegationTool
+from .events import EventBus, HarnessEvent
 from .models import CostTracker
 from .session import Session
 
@@ -50,6 +51,7 @@ class Team:
         cost_tracker: CostTracker,
         base_dir: str = ".",
         session: Session | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.config = config
         self.name = config.name
@@ -57,6 +59,7 @@ class Team:
         self.cost_tracker = cost_tracker
         self.base_dir = base_dir
         self.session = session
+        self.event_bus = event_bus
 
         # Create lead agent
         self.lead = Agent(
@@ -65,6 +68,7 @@ class Team:
             cost_tracker=cost_tracker,
             base_dir=base_dir,
             session=session,
+            event_bus=event_bus,
         )
 
         # Create worker agents
@@ -76,6 +80,7 @@ class Team:
                 cost_tracker=cost_tracker,
                 base_dir=base_dir,
                 session=session,
+                event_bus=event_bus,
             )
             self.workers[wcfg.name] = worker
 
@@ -106,6 +111,9 @@ class Team:
         all_worker_results: list[dict[str, Any]] = []
         round_num = 0
         lead_text = ""
+
+        if self.event_bus:
+            self.event_bus.emit(HarnessEvent("team_start", team=self.name, data={"task": task[:200], "till_done": till_done, "max_rounds": max_rounds}))
 
         while round_num < max_rounds:
             round_num += 1
@@ -146,6 +154,11 @@ class Team:
             if not delegations:
                 break  # No delegation on first round = lead handled it directly
 
+            # Emit delegation events
+            if self.event_bus:
+                for dep in delegations:
+                    self.event_bus.emit(HarnessEvent("agent_start", agent=dep["to"], team=self.name, data={"task": dep["task"][:100], "delegated_by": self.lead.name}))
+
             # Execute worker delegations in parallel
             worker_tasks = []
             for dep in delegations:
@@ -172,6 +185,9 @@ class Team:
         self.lead.update_expertise(
             f"## Session Insight\nCoordinated team '{self.name}' on task: {task[:100]}"
         )
+
+        if self.event_bus:
+            self.event_bus.emit(HarnessEvent("team_done", team=self.name, data={"rounds": round_num, "workers_used": len(all_worker_results), "final_length": len(final_text)}))
 
         return {
             "team": self.name,

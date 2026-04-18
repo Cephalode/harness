@@ -10,6 +10,7 @@ from typing import Any
 from .config import AgentConfig
 from .domain import DomainEnforcer
 from .expertise import ExpertiseManager
+from .events import EventBus, HarnessEvent
 from .models import CostTracker, TokenUsage, parse_usage_from_pi_output
 from .session import Session
 from .skills import SkillLoader
@@ -25,12 +26,14 @@ class Agent:
         cost_tracker: CostTracker | None = None,
         base_dir: str = ".",
         session: Session | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.config = config
         self.team_name = team_name
         self.cost_tracker = cost_tracker or CostTracker()
         self.base_dir = base_dir
         self.session = session
+        self.event_bus = event_bus
 
         self.domain_enforcer = DomainEnforcer(config.domain, base_dir)
         self.expertise_manager = ExpertiseManager(base_dir)
@@ -106,6 +109,9 @@ class Agent:
 
         models_to_try = [self.model] + self.config.fallback_models
 
+        if self.event_bus:
+            self.event_bus.emit(HarnessEvent("agent_start", agent=self.name, team=self.team_name, data={"model": models_to_try[0], "message_length": len(message)}))
+
         for i, model in enumerate(models_to_try):
             # Build the pi CLI command (prompt piped via stdin, not -p flag)
             cmd = [
@@ -126,15 +132,21 @@ class Agent:
 
             # Success = no error and non-empty result
             if not result.get("error") and result.get("result", "").strip():
+                if self.event_bus:
+                    self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"model": result.get("model", model), "status": "success", "result_length": len(result.get("result", ""))}))
                 return result
 
             # Failure but no more models to try
             if i >= len(models_to_try) - 1:
+                if self.event_bus:
+                    self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "all_models_failed"}))
                 return result
 
             # Try next model
             continue
 
+        if self.event_bus:
+            self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "all_models_failed"}))
         return {"error": "all models failed", "result": "All model attempts failed", "usage": {}}
 
     async def _execute_pi(

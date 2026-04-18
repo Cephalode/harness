@@ -9,6 +9,7 @@ from typing import Any
 from .agent import Agent
 from .config import HarnessConfig, TeamConfig, TeamInstanceConfig
 from .delegate import DelegationTool
+from .events import EventBus, HarnessEvent
 from .models import CostTracker
 from .session import Session
 from .team import Team
@@ -33,11 +34,13 @@ class Orchestrator:
         config: HarnessConfig,
         cost_tracker: CostTracker | None = None,
         session: Session | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.config = config
         self.base_dir = config.base_dir
         self.cost_tracker = cost_tracker or CostTracker()
         self.session = session or Session(sessions_dir=str(self._resolve_path("sessions")))
+        self.event_bus = event_bus
 
         # Create orchestrator agent
         self.agent = Agent(
@@ -46,6 +49,7 @@ class Orchestrator:
             cost_tracker=self.cost_tracker,
             base_dir=self.base_dir,
             session=self.session,
+            event_bus=event_bus,
         )
 
         # Create teams (expand instances into separate Team objects)
@@ -61,6 +65,7 @@ class Orchestrator:
                     cost_tracker=self.cost_tracker,
                     base_dir=self.base_dir,
                     session=self.session,
+                    event_bus=self.event_bus,
                 )
                 self.teams[tcfg.name] = team
 
@@ -88,6 +93,7 @@ class Orchestrator:
             cost_tracker=self.cost_tracker,
             base_dir=self.base_dir,
             session=self.session,
+            event_bus=self.event_bus,
         )
 
     def _has_images(self, message: str) -> bool:
@@ -119,6 +125,9 @@ class Orchestrator:
             role="user",
             content=user_message,
         )
+
+        if self.event_bus:
+            self.event_bus.emit(HarnessEvent("session_start", data={"message": user_message[:200]}))
 
         # Check if message matches a command workflow
         command_name = None
@@ -183,6 +192,9 @@ class Orchestrator:
         # Parse routing decision
         selected_teams = self._parse_team_selection(routing_text)
 
+        if self.event_bus:
+            self.event_bus.emit(HarnessEvent("routing", data={"teams": selected_teams, "rationale": routing_text[:200]}))
+
         if not selected_teams:
             # If no teams selected, use the orchestrator's direct response
             self.session.add_message(
@@ -244,6 +256,9 @@ class Orchestrator:
             f"## Orchestration Insight\n"
             f"Handled request via teams: {', '.join(selected_teams)}"
         )
+
+        if self.event_bus:
+            self.event_bus.emit(HarnessEvent("session_end", data={"response_length": len(final_response)}))
 
         return final_response
 

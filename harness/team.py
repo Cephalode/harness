@@ -88,29 +88,64 @@ class Team:
     def worker_names(self) -> list[str]:
         return list(self.workers.keys())
 
-    async def execute(self, task: str, context: str = "") -> dict[str, Any]:
-        """Execute a task through this team.
+    async def execute(
+        self,
+        task: str,
+        context: str = "",
+        till_done: bool = True,
+        max_rounds: int = 5,
+    ) -> dict[str, Any]:
+        """Execute a task through this team with till-done orchestration.
 
         1. Lead receives the task
         2. Lead may delegate to workers
         3. Workers execute in parallel
-        4. Results are aggregated
+        4. Results go back to lead for review
+        5. Loop until lead says DONE or max_rounds reached
         """
-        # Run the lead agent
-        lead_result = await self.lead.run(
-            message=task,
-            context=context,
-        )
+        all_worker_results: list[dict[str, Any]] = []
+        round_num = 0
+        lead_text = ""
 
-        lead_text = lead_result.get("result", "")
-        if isinstance(lead_text, dict):
-            lead_text = str(lead_text)
+        while round_num < max_rounds:
+            round_num += 1
 
-        # Parse delegation blocks from lead's response
-        delegations = parse_delegation_blocks(lead_text)
+            if round_num == 1:
+                lead_result = await self.lead.run(
+                    message=task,
+                    context=context,
+                )
+            else:
+                # Follow-up: ask lead to continue or wrap up
+                prev_workers = all_worker_results[-1] if all_worker_results else []
+                followup = (
+                    f"Previous round completed. Results so far:\n"
+                    f"{self._compile_result(lead_text, prev_workers)}\n\n"
+                    f"If all tasks from the original request are complete, respond with:\n"
+                    f"DONE: <summary>\n\n"
+                    f"If not, delegate the remaining work to your workers."
+                )
+                lead_result = await self.lead.run(
+                    message=followup,
+                    context=task,
+                )
 
-        worker_results: list[dict[str, Any]] = []
-        if delegations:
+            lead_text = lead_result.get("result", "")
+            if isinstance(lead_text, dict):
+                lead_text = str(lead_text)
+
+            # Check if lead says done
+            if till_done and lead_text.strip().upper().startswith("DONE:"):
+                break
+
+            # Parse delegation blocks from lead's response
+            delegations = parse_delegation_blocks(lead_text)
+            if not delegations and round_num > 1:
+                # No delegation on follow-up = lead is done
+                break
+            if not delegations:
+                break  # No delegation on first round = lead handled it directly
+
             # Execute worker delegations in parallel
             worker_tasks = []
             for dep in delegations:
@@ -125,9 +160,13 @@ class Team:
 
             if worker_tasks:
                 worker_results = await asyncio.gather(*worker_tasks)
+                all_worker_results.extend(worker_results)
+
+            if not till_done:
+                break  # Single-shot mode
 
         # Compile final result
-        final_text = self._compile_result(lead_text, worker_results)
+        final_text = self._compile_result(lead_text, all_worker_results)
 
         # Update lead expertise
         self.lead.update_expertise(
@@ -137,9 +176,10 @@ class Team:
         return {
             "team": self.name,
             "lead_response": lead_text,
-            "worker_results": worker_results,
+            "worker_results": all_worker_results,
             "final_response": final_text,
-            "workers_used": len(worker_results),
+            "workers_used": len(all_worker_results),
+            "rounds": round_num,
         }
 
     def _compile_result(

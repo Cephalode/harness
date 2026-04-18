@@ -91,6 +91,29 @@ class Orchestrator:
             content=user_message,
         )
 
+        # Check if message matches a command workflow
+        command_name = None
+        command_input = user_message
+        words = user_message.split()
+        if words and ":" in words[0]:
+            candidate = words[0].rstrip(":")
+            if candidate in self.config.commands:
+                command_name = candidate
+                command_input = " ".join(words[1:])
+
+        if command_name:
+            from .commands import execute_command, format_command_summary
+            cmd = self.config.commands[command_name]
+            results = await execute_command(cmd, command_input, self.teams)
+            summary = format_command_summary(command_name, results)
+
+            self.session.add_message(
+                role="assistant",
+                content=summary,
+                agent="orchestrator",
+            )
+            return summary
+
         # Step 1: Orchestrator decides routing
         team_names = list(self.teams.keys())
         routing_prompt = (

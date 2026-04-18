@@ -80,6 +80,7 @@ class HarnessCLI:
             ("/expertise [agent]", "Show an agent's expertise/mental model"),
             ("/compact", "Compress conversation history"),
             ("/clear", "Clear conversation"),
+            ("/commands", "List available command workflows"),
             ("/help", "Show this help"),
             ("/quit", "Exit the harness"),
         ]
@@ -169,6 +170,18 @@ class HarnessCLI:
             if self.session:
                 self.session.clear()
                 console.print("[green]✓ Conversation cleared[/green]")
+            return True
+
+        elif cmd == "/commands":
+            if self.orchestrator:
+                cmds = self.orchestrator.config.commands
+                if cmds:
+                    for name, cmd_cfg in cmds.items():
+                        console.print(f"  [cyan]{name}:[/cyan] {cmd_cfg.description}")
+                else:
+                    console.print("[yellow]No command workflows configured[/yellow]")
+            else:
+                console.print("[yellow]No session active[/yellow]")
             return True
 
         return False

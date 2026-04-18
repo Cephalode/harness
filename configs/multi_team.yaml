@@ -1,0 +1,115 @@
+# Multi-Team Agentic Coding Harness Configuration
+#
+# Runtime: PI coding agent (pi -p)
+# Models: Leave empty to use PI's default provider/model from ~/.pi/agent/settings.json
+#          Or specify with provider prefix: "z-ai/glm-5.1", "anthropic/claude-opus-4-6", etc.
+#
+# Default PI config: provider=z-ai, model=glm-5.1
+
+orchestrator:
+  name: orchestrator
+  model: ""
+  system_prompt: agents/orchestrator.md
+  expertise:
+    - path: expertise/orchestrator.md
+      updatable: true
+      max_lines: 10000
+  skills:
+    - skills/active_listener.md
+    - skills/zero_micromanagement.md
+    - skills/conversational_response.md
+    - skills/mental_model.md
+
+teams:
+  - name: planning
+    color: blue
+    lead:
+      name: planning_lead
+      model: ""
+      system_prompt: agents/planning_lead.md
+      expertise:
+        - path: expertise/planning_lead.md
+          updatable: true
+          max_lines: 10000
+      skills:
+        - skills/active_listener.md
+        - skills/zero_micromanagement.md
+        - skills/conversational_response.md
+        - skills/mental_model.md
+      domain:
+        read: ["."]
+        update: ["expertise/", "specs/"]
+    workers:
+      - name: planner
+        model: ""
+        system_prompt: agents/planning_lead.md
+        skills:
+          - skills/active_listener.md
+          - skills/mental_model.md
+        domain:
+          read: ["."]
+          update: ["expertise/"]
+
+  - name: engineering
+    color: green
+    lead:
+      name: engineering_lead
+      model: ""
+      system_prompt: agents/engineering_lead.md
+      expertise:
+        - path: expertise/engineering_lead.md
+          updatable: true
+          max_lines: 10000
+      skills:
+        - skills/active_listener.md
+        - skills/zero_micromanagement.md
+        - skills/conversational_response.md
+        - skills/mental_model.md
+      domain:
+        read: ["."]
+        update: ["expertise/"]
+    workers:
+      - name: frontend_dev
+        model: ""
+        system_prompt: agents/frontend_dev.md
+        domain:
+          read: ["."]
+          update: ["frontend/", "src/components/", "src/styles/"]
+      - name: backend_dev
+        model: ""
+        system_prompt: agents/backend_dev.md
+        domain:
+          read: ["."]
+          update: ["backend/", "src/api/", "src/models/", "src/services/"]
+
+  - name: validation
+    color: red
+    lead:
+      name: validation_lead
+      model: ""
+      system_prompt: agents/validation_lead.md
+      expertise:
+        - path: expertise/validation_lead.md
+          updatable: true
+          max_lines: 10000
+      skills:
+        - skills/active_listener.md
+        - skills/zero_micromanagement.md
+        - skills/conversational_response.md
+        - skills/mental_model.md
+      domain:
+        read: ["."]
+        update: ["expertise/"]
+    workers:
+      - name: qa_engineer
+        model: ""
+        system_prompt: agents/qa_engineer.md
+        domain:
+          read: ["."]
+          update: ["tests/", "expertise/"]
+      - name: security_reviewer
+        model: ""
+        system_prompt: agents/security_reviewer.md
+        domain:
+          read: ["."]
+          update: ["expertise/"]

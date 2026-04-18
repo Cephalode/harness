@@ -35,6 +35,14 @@ class AgentConfig:
     skills: list[str] = field(default_factory=list)
     domain: DomainConfig = field(default_factory=DomainConfig)
     max_turns: int = 30
+    fallback_models: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TeamInstanceConfig:
+    """A single instance of a team with optional model overrides."""
+    name: str
+    model_overrides: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -44,6 +52,22 @@ class TeamConfig:
     color: str = "white"
     lead: AgentConfig = field(default_factory=None)  # type: ignore[assignment]
     workers: list[AgentConfig] = field(default_factory=list)
+    instances: list[TeamInstanceConfig] = field(default_factory=list)
+
+
+@dataclass
+class CommandStep:
+    """A single step in a command workflow."""
+    team: str
+    prompt_template: str = "{input}"
+
+
+@dataclass
+class CommandConfig:
+    """A reusable command workflow."""
+    name: str
+    description: str = ""
+    steps: list[CommandStep] = field(default_factory=list)
 
 
 @dataclass
@@ -52,6 +76,7 @@ class HarnessConfig:
     orchestrator: AgentConfig
     teams: list[TeamConfig] = field(default_factory=list)
     base_dir: str = "."
+    commands: dict[str, CommandConfig] = field(default_factory=dict)
 
 
 def _parse_domain(data: dict[str, Any] | None) -> DomainConfig:
@@ -85,6 +110,7 @@ def _parse_agent(data: dict[str, Any]) -> AgentConfig:
         skills=data.get("skills", []),
         domain=_parse_domain(data.get("domain")),
         max_turns=data.get("max_turns", 30),
+        fallback_models=data.get("fallback_models", []),
     )
 
 
@@ -111,20 +137,46 @@ def load_config(path: str | Path) -> HarnessConfig:
     for team_data in data.get("teams", []):
         lead = _parse_agent(team_data["lead"])
         workers = [_parse_agent(w) for w in team_data.get("workers", [])]
+        instances = [
+            TeamInstanceConfig(
+                name=inst["name"],
+                model_overrides=inst.get("models", {}),
+            )
+            for inst in team_data.get("instances", [])
+        ]
         teams.append(
             TeamConfig(
                 name=team_data["name"],
                 color=team_data.get("color", "white"),
                 lead=lead,
                 workers=workers,
+                instances=instances,
             )
         )
+
+    # Parse commands
+    commands: dict[str, CommandConfig] = {}
+    for cmd_data in data.get("commands", []):
+        steps = [
+            CommandStep(
+                team=s["team"],
+                prompt_template=s.get("prompt", "{input}"),
+            )
+            for s in cmd_data.get("steps", [])
+        ]
+        cmd = CommandConfig(
+            name=cmd_data["name"],
+            description=cmd_data.get("description", ""),
+            steps=steps,
+        )
+        commands[cmd.name] = cmd
 
     base_dir = str(path.parent.parent.resolve())
     return HarnessConfig(
         orchestrator=orchestrator,
         teams=teams,
         base_dir=base_dir,
+        commands=commands,
     )
 
 
@@ -157,5 +209,14 @@ def validate_config(config: HarnessConfig) -> list[str]:
         names.extend(w.name for w in team.workers)
     if len(names) != len(set(names)):
         warnings.append("Duplicate agent names detected")
+
+    # Validate commands reference existing teams
+    team_names = set(config.teams) if isinstance(config.teams, dict) else {t.name for t in config.teams}
+    for cmd_name, cmd in config.commands.items():
+        for step in cmd.steps:
+            if step.team not in team_names:
+                warnings.append(
+                    f"Command '{cmd_name}' step references unknown team '{step.team}'"
+                )
 
     return warnings

@@ -160,6 +160,13 @@ teams:
         domain:
           read: ["."]
           update: ["expertise/"]
+      - name: visual_reviewer
+        model: "z-ai/glm-4.6v"
+        vision: true
+        system_prompt: agents/visual_reviewer.md
+        domain:
+          read: ["."]
+          update: ["expertise/"]
 
 # ── Reusable Command Workflows ────────────────────────────────────
 # Invoke with: <command_name>: <user input>

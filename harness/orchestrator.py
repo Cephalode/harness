@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from .agent import Agent
@@ -11,6 +12,17 @@ from .delegate import DelegationTool
 from .models import CostTracker
 from .session import Session
 from .team import Team
+
+
+# Module-level patterns for detecting image references in user messages
+_IMAGE_PATTERNS = [
+    re.compile(r'!\[[^\]]*\]\([^)]+\)'),                                    # markdown images ![alt](url)
+    re.compile(r'https?://\S+\.(?:png|jpg|jpeg|gif|webp|svg|bmp)',          # bare image URLs
+               re.IGNORECASE),
+    re.compile(r'(?:^|\s)/?(?:\S+/)*\S+\.(?:png|jpg|jpeg|gif|webp|svg|bmp)',  # file paths
+               re.IGNORECASE),
+    re.compile(r'<img\s', re.IGNORECASE),                                   # HTML img tags
+]
 
 
 class Orchestrator:
@@ -78,6 +90,23 @@ class Orchestrator:
             session=self.session,
         )
 
+    def _has_images(self, message: str) -> bool:
+        """Check if a message contains image references."""
+        return any(p.search(message) for p in _IMAGE_PATTERNS)
+
+    def _has_vision_team(self) -> list[str]:
+        """Return team names that have at least one vision-capable agent."""
+        vision_teams: list[str] = []
+        for name, team in self.teams.items():
+            if getattr(team.lead.config, 'vision', False):
+                vision_teams.append(name)
+                continue
+            for worker in team.workers.values():
+                if getattr(worker.config, 'vision', False):
+                    vision_teams.append(name)
+                    break
+        return vision_teams
+
     async def process_message(self, user_message: str) -> str:
         """Process a user message through the orchestration pipeline.
 
@@ -115,13 +144,32 @@ class Orchestrator:
             return summary
 
         # Step 1: Orchestrator decides routing
-        team_names = list(self.teams.keys())
+        # Build team listing with vision info
+        has_image = self._has_images(user_message)
+        vision_teams = self._has_vision_team() if has_image else []
+
+        team_list_lines = []
+        for name, team in self.teams.items():
+            vision_marker = " [VISION CAPABLE]" if name in vision_teams else ""
+            team_list_lines.append(f"- {name}: {team.config.lead.name}{vision_marker}")
+
         routing_prompt = (
             f"{user_message}\n\n"
             f"## Available Teams\n"
-            + "\n".join(f"- {name}: {team.config.lead.name}" for name, team in self.teams.items())
+            + "\n".join(team_list_lines)
             + "\n\nDecide which team(s) should handle this request. "
-            "Respond with ONLY a JSON object: {\"teams\": [\"team_name\", ...], \"rationale\": \"...\"}"
+        )
+
+        if has_image:
+            routing_prompt += (
+                "IMPORTANT: This message contains image(s). "
+                "You MUST select at least one team that is marked [VISION CAPABLE] "
+                "to analyze the visual content. "
+            )
+
+        routing_prompt += (
+            "Respond with ONLY a JSON object: "
+            "{\"teams\": [\"team_name\", ...], \"rationale\": \"...\"}"
         )
 
         routing_result = await self.agent.run(

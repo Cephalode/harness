@@ -36,6 +36,7 @@ class AgentConfig:
     domain: DomainConfig = field(default_factory=DomainConfig)
     max_turns: int = 30
     fallback_models: list[str] = field(default_factory=list)
+    vision: bool = False
 
 
 @dataclass
@@ -111,6 +112,7 @@ def _parse_agent(data: dict[str, Any]) -> AgentConfig:
         domain=_parse_domain(data.get("domain")),
         max_turns=data.get("max_turns", 30),
         fallback_models=data.get("fallback_models", []),
+        vision=data.get("vision", False),
     )
 
 

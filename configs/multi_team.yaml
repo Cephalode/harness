@@ -19,6 +19,7 @@ orchestrator:
     - skills/zero_micromanagement.md
     - skills/conversational_response.md
     - skills/mental_model.md
+    - skills/delegate.md
 
 teams:
   - name: planning
@@ -36,6 +37,7 @@ teams:
         - skills/zero_micromanagement.md
         - skills/conversational_response.md
         - skills/mental_model.md
+        - skills/delegate.md
       domain:
         read: ["."]
         update: ["expertise/", "specs/"]
@@ -60,11 +62,15 @@ teams:
         - path: expertise/engineering_lead.md
           updatable: true
           max_lines: 10000
+        - path: expertise/coding_standards.md
+          updatable: false
+          max_lines: 500
       skills:
         - skills/active_listener.md
         - skills/zero_micromanagement.md
         - skills/conversational_response.md
         - skills/mental_model.md
+        - skills/delegate.md
       domain:
         read: ["."]
         update: ["expertise/"]
@@ -97,6 +103,7 @@ teams:
         - skills/zero_micromanagement.md
         - skills/conversational_response.md
         - skills/mental_model.md
+        - skills/delegate.md
       domain:
         read: ["."]
         update: ["expertise/"]

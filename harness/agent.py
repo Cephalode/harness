@@ -104,47 +104,55 @@ class Agent:
         system_prompt = self._build_system_prompt()
         prompt = self._build_prompt(message, context)
 
-        # Build the pi CLI command
-        # pi uses --system-prompt for the system prompt
-        # pi uses --model for model selection (use provider/id format or omit for default)
-        # pi uses --mode json for structured JSON output
-        # pi uses --tools to restrict available tools
-        cmd = [
-            "pi",
-            "-p", prompt,
-            "--system-prompt", system_prompt,
-            "--mode", "json",
-        ]
+        models_to_try = [self.model] + self.config.fallback_models
 
-        # Only add --model if specified (otherwise PI uses its default provider/model)
-        if self.model:
-            cmd.extend(["--model", self.model])
+        for i, model in enumerate(models_to_try):
+            # Build the pi CLI command (prompt piped via stdin, not -p flag)
+            cmd = [
+                "pi",
+                "--system-prompt", system_prompt,
+                "--mode", "json",
+            ]
 
-        # Restrict tools based on domain - workers that shouldn't write get read-only
-        if self.config.domain.update and "." not in self.config.domain.update:
-            # Only allow read access if domain is constrained
-            cmd.extend(["--tools", "read,bash"])
+            # Only add --model if specified (otherwise PI uses its default provider/model)
+            if model:
+                cmd.extend(["--model", model])
 
-        try:
-            result = await self._execute_pi(cmd, timeout)
-            return result
-        except Exception as e:
-            return {
-                "error": str(e),
-                "result": f"Agent {self.name} failed: {e}",
-                "usage": {},
-            }
+            # Restrict tools based on domain - workers that shouldn't write get read-only
+            if self.config.domain.update and "." not in self.config.domain.update:
+                cmd.extend(["--tools", "read,bash"])
 
-    async def _execute_pi(self, cmd: list[str], timeout: int) -> dict[str, Any]:
-        """Execute pi CLI command and parse JSONL output."""
+            result = await self._execute_pi(cmd, prompt, timeout)
+
+            # Success = no error and non-empty result
+            if not result.get("error") and result.get("result", "").strip():
+                return result
+
+            # Failure but no more models to try
+            if i >= len(models_to_try) - 1:
+                return result
+
+            # Try next model
+            continue
+
+        return {"error": "all models failed", "result": "All model attempts failed", "usage": {}}
+
+    async def _execute_pi(
+        self, cmd: list[str], prompt_text: str, timeout: int,
+    ) -> dict[str, Any]:
+        """Execute pi CLI command with prompt piped via stdin, parse JSONL output."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.base_dir,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=prompt_text.encode("utf-8")),
+                timeout=timeout,
+            )
         except asyncio.TimeoutError:
             proc.kill()  # type: ignore
             return {

@@ -12,7 +12,7 @@
 
 orchestrator:
   name: orchestrator
-  model: "z-ai/glm-5.1"
+  model: "z-ai/glm-5.1"          # only agent using glm-5.1 — single entry point
   system_prompt: agents/orchestrator.md
   expertise:
     - path: expertise/orchestrator.md
@@ -30,9 +30,9 @@ teams:
     color: blue
     lead:
       name: planning_lead
-      model: "z-ai/glm-5.1"
+      model: "opencode-go/kimi-k2.5"
       fallback_models:
-        - "opencode-go/qwen3.6-plus"
+        - "z-ai/glm-5.1"
         - "z-ai/glm-4.7-flashx"
       system_prompt: agents/planning_lead.md
       expertise:
@@ -79,9 +79,9 @@ teams:
           backend_dev: "opencode-go/qwen3.6-plus"
     lead:
       name: engineering_lead
-      model: "z-ai/glm-5.1"        # default (overridden by instances)
+      model: "opencode-go/qwen3.6-plus"  # default (overridden by instances)
       fallback_models:
-        - "opencode-go/kimi-k2.5"
+        - "z-ai/glm-5.1"
         - "z-ai/glm-4.7-flashx"
       system_prompt: agents/engineering_lead.md
       expertise:
@@ -124,9 +124,9 @@ teams:
     color: red
     lead:
       name: validation_lead
-      model: "z-ai/glm-5.1"
+      model: "opencode-go/mimo-v2-pro"
       fallback_models:
-        - "opencode-go/qwen3.6-plus"
+        - "z-ai/glm-5.1"
         - "z-ai/glm-4.7-flashx"
       system_prompt: agents/validation_lead.md
       expertise:

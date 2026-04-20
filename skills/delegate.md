@@ -45,6 +45,9 @@ context: Must return JWT token. Follow existing auth patterns in src/api/auth.ts
 ## Agent Selection
 
 Choose the right agent for the task:
+- **research_lead** — For coordinating research and investigation tasks
+- **deep_researcher** — For technology research, library evaluation, documentation synthesis
+- **code_investigator** — For codebase analysis, call chain tracing, dependency mapping
 - **planner** — For research, planning, and documentation
 - **frontend_dev** — For UI/components/styles
 - **backend_dev** — For APIs/models/services

@@ -120,6 +120,41 @@ teams:
           read: ["."]
           update: ["backend/", "src/api/", "src/models/", "src/services/"]
 
+  - name: research
+    color: cyan
+    lead:
+      name: research_lead
+      model: "opencode-go/kimi-k2.5"
+      fallback_models: ["z-ai/glm-5.1"]
+      system_prompt: agents/research_lead.md
+      expertise:
+        - path: expertise/research_lead.md
+          updatable: true
+          max_lines: 10000
+      skills:
+        - skills/active_listener.md
+        - skills/zero_micromanagement.md
+        - skills/conversational_response.md
+        - skills/mental_model.md
+        - skills/delegate.md
+      domain:
+        read: ["."]
+        update: ["expertise/", "docs/", "research/"]
+    workers:
+      - name: deep_researcher
+        model: "z-ai/glm-4.7-flashx"
+        fallback_models: ["opencode-go/qwen3.6-plus"]
+        system_prompt: agents/deep_researcher.md
+        domain:
+          read: ["."]
+          update: ["docs/", "research/"]
+      - name: code_investigator
+        model: "z-ai/glm-4.7-flashx"
+        system_prompt: agents/code_investigator.md
+        domain:
+          read: ["."]
+          update: ["expertise/", "docs/"]
+
   - name: validation
     color: red
     lead:
@@ -218,6 +253,18 @@ commands:
     steps:
       - team: validation
         prompt: "Review the following code change for bugs, security issues, and test coverage: {input}"
+
+  - name: research-plan-build-validate
+    description: "Research → Plan → Build → Validate — full lifecycle with research phase"
+    steps:
+      - team: research
+        prompt: "Investigate and gather information about: {input}"
+      - team: planning
+        prompt: "Based on this research, create an implementation plan for: {input}\n\nResearch:\n{prev_result}"
+      - team: engineering_A
+        prompt: "Implement this plan:\n{prev_result}\n\nOriginal request: {input}"
+      - team: validation
+        prompt: "Review and test the implementation of: {input}\n{prev_result}"
 
   - name: full-pipeline
     description: "Plan → competing implementations A+B → validate the best approach"

@@ -14,7 +14,13 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useDashboardStore } from '../store'
 
-// Custom node component for agents
+// --- Layout constants ---
+const NODE_WIDTH = 160
+const NODE_HEIGHT = 80
+const LEVEL_GAP = 250 // horizontal gap between hierarchy levels
+const NODE_GAP = 20 // vertical gap between sibling nodes
+const TEAM_GAP = 60 // extra vertical gap between teams
+
 function AgentNodeComponent({ data }: { data: { label: string; model: string; status: string; vision?: boolean; role: string } }) {
   const statusColors: Record<string, string> = {
     idle: '#fbbf24',
@@ -54,7 +60,19 @@ const nodeTypes: NodeTypes = {
   agent: AgentNodeComponent as never,
 }
 
-// Layout positions for the hierarchy
+/**
+ * Manual left-to-right layout algorithm.
+ *
+ * Columns (X axis) represent hierarchy depth:
+ *   col 0 → Orchestrator
+ *   col 1 → Team Leads
+ *   col 2 → Workers
+ *
+ * Rows (Y axis) spread nodes within the same level.
+ * Each team is allocated a vertical slice tall enough for all its workers,
+ * and teams are stacked with TEAM_GAP between them. The orchestrator is
+ * centered vertically relative to all teams.
+ */
 function buildGraph(
   teamData: ReturnType<typeof useDashboardStore.getState>['teamData'],
   agentStatuses: Record<string, string>,
@@ -64,12 +82,41 @@ function buildGraph(
   const nodes: Node[] = []
   const edges: Edge[] = []
 
-  // Orchestrator at top center
+  const teams = teamData.teams
+  const teamCount = teams.length
+
+  // Column X positions
+  const col0 = 0 // orchestrator
+  const col1 = LEVEL_GAP // leads
+  const col2 = LEVEL_GAP * 2 // workers
+
+  // Step 1: Calculate the vertical height each team needs.
+  // A team's height is determined by its workers column.
+  const teamHeights = teams.map((team) => {
+    const workerCount = team.workers.length
+    if (workerCount === 0) return NODE_HEIGHT
+    return workerCount * NODE_HEIGHT + (workerCount - 1) * NODE_GAP
+  })
+
+  // Total diagram height = sum of team heights + gaps between teams
+  const totalHeight =
+    teamHeights.reduce((sum, h) => sum + h, 0) + (teamCount - 1) * TEAM_GAP
+
+  // Step 2: Calculate Y offsets for each team (cumulative).
+  const teamYOffsets: number[] = []
+  let runningY = 0
+  for (let i = 0; i < teamCount; i++) {
+    teamYOffsets.push(runningY)
+    runningY += teamHeights[i] + TEAM_GAP
+  }
+
+  // Step 3: Place the orchestrator, centered vertically.
   const orchStatus = agentStatuses[teamData.orchestrator.name] || 'idle'
+  const orchY = Math.max(0, (totalHeight - NODE_HEIGHT) / 2)
   nodes.push({
     id: 'orchestrator',
     type: 'agent',
-    position: { x: 400, y: 50 },
+    position: { x: col0, y: orchY },
     data: {
       label: teamData.orchestrator.name,
       model: teamData.orchestrator.model,
@@ -78,20 +125,20 @@ function buildGraph(
     },
   })
 
-  const teamCount = teamData.teams.length
-  const teamSpacing = 300
-  const startX = 400 - ((teamCount - 1) * teamSpacing) / 2
-
-  teamData.teams.forEach((team, ti) => {
-    const teamX = startX + ti * teamSpacing
+  // Step 4: For each team, place the lead and its workers.
+  teams.forEach((team, ti) => {
     const teamId = `team-${team.name}`
+    const teamTop = teamYOffsets[ti]
+    const teamHeight = teamHeights[ti]
 
-    // Lead node
+    // Lead is centered vertically within the team's allocated space
+    const leadY = teamTop + (teamHeight - NODE_HEIGHT) / 2
     const leadStatus = agentStatuses[team.lead.name] || 'idle'
+
     nodes.push({
       id: teamId,
       type: 'agent',
-      position: { x: teamX, y: 200 },
+      position: { x: col1, y: leadY },
       data: {
         label: team.lead.name,
         model: team.lead.model,
@@ -100,7 +147,7 @@ function buildGraph(
       },
     })
 
-    // Edge: orchestrator -> lead
+    // Edge: orchestrator → lead
     edges.push({
       id: `orch-${team.name}`,
       source: 'orchestrator',
@@ -110,17 +157,17 @@ function buildGraph(
       markerEnd: { type: MarkerType.ArrowClosed, color: '#4a4a6a' },
     })
 
-    // Worker nodes
-    const workerSpacing = 160
-    const workersStartX = teamX - ((team.workers.length - 1) * workerSpacing) / 2
-
+    // Workers: evenly spaced within the team's vertical space
     team.workers.forEach((worker, wi) => {
       const workerId = `worker-${worker.name}`
       const workerStatus = agentStatuses[worker.name] || 'idle'
+
+      const workerY = teamTop + wi * (NODE_HEIGHT + NODE_GAP)
+
       nodes.push({
         id: workerId,
         type: 'agent',
-        position: { x: workersStartX + wi * workerSpacing, y: 350 },
+        position: { x: col2, y: workerY },
         data: {
           label: worker.name,
           model: worker.model,
@@ -130,7 +177,7 @@ function buildGraph(
         },
       })
 
-      // Edge: lead -> worker
+      // Edge: lead → worker
       edges.push({
         id: `${team.name}-${worker.name}`,
         source: teamId,

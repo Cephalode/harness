@@ -37,6 +37,7 @@ class AgentConfig:
     max_turns: int = 30
     fallback_models: list[str] = field(default_factory=list)
     vision: bool = False
+    only_instances: list[str] = field(default_factory=list)  # empty = all instances
 
 
 @dataclass
@@ -51,7 +52,7 @@ class TeamConfig:
     """Configuration for a team (lead + workers)."""
     name: str
     color: str = "white"
-    lead: AgentConfig = field(default_factory=None)  # type: ignore[assignment]
+    lead: AgentConfig | None = field(default=None)
     workers: list[AgentConfig] = field(default_factory=list)
     instances: list[TeamInstanceConfig] = field(default_factory=list)
 
@@ -113,6 +114,7 @@ def _parse_agent(data: dict[str, Any]) -> AgentConfig:
         max_turns=data.get("max_turns", 30),
         fallback_models=data.get("fallback_models", []),
         vision=data.get("vision", False),
+        only_instances=data.get("only_instances", []),
     )
 
 

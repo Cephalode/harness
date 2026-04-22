@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: '0.0.0.0',
+    allowedHosts: ['metasepia', 'lunalata'],
     proxy: {
       '/api': 'http://localhost:5174',
       '/ws': { target: 'http://localhost:5174', ws: true },

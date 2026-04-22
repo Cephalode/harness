@@ -51,5 +51,7 @@ Choose the right agent for the task:
 - **planner** — For research, planning, and documentation
 - **frontend_dev** — For UI/components/styles
 - **backend_dev** — For APIs/models/services
+- **browser_harness_agent** — For browser automation, E2E testing, visual verification
 - **qa_engineer** — For testing and quality assurance
 - **security_reviewer** — For security analysis
+- **visual_reviewer** — For visual analysis, screenshot review, UI verification

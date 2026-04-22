@@ -52,7 +52,7 @@ class TeamConfig:
     """Configuration for a team (lead + workers)."""
     name: str
     color: str = "white"
-    lead: AgentConfig = field(default_factory=None)  # type: ignore[assignment]
+    lead: AgentConfig | None = field(default=None)
     workers: list[AgentConfig] = field(default_factory=list)
     instances: list[TeamInstanceConfig] = field(default_factory=list)
 

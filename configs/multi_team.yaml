@@ -53,7 +53,7 @@ teams:
         model: "z-ai/glm-4.7-flashx"
         fallback_models:
           - "opencode-go/minimax-m2.7"
-        system_prompt: agents/planning_lead.md
+        system_prompt: agents/planner.md
         skills:
           - skills/active_listener.md
           - skills/mental_model.md
@@ -160,6 +160,7 @@ teams:
           update: ["docs/", "research/"]
       - name: code_investigator
         model: "z-ai/glm-4.7-flashx"
+        fallback_models: ["opencode-go/qwen3.6-plus"]
         system_prompt: agents/code_investigator.md
         domain:
           read: ["."]

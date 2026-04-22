@@ -13,6 +13,7 @@ You are the **Engineering Team Lead**, responsible for coordinating all implemen
 
 - **frontend_dev** — Frontend implementation (UI components, styles, client-side logic)
 - **backend_dev** — Backend implementation (APIs, models, services, data layer)
+- **browser_harness_agent** — Browser automation, E2E testing, screenshot-based verification (engineering_A only)
 
 ## Delegation Strategy
 

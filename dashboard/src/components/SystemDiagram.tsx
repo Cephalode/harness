@@ -159,7 +159,7 @@ function buildGraph(
 
     // Workers: evenly spaced within the team's vertical space
     team.workers.forEach((worker, wi) => {
-      const workerId = `worker-${worker.name}`
+      const workerId = `worker-${team.name}-${worker.name}`
       const workerStatus = agentStatuses[worker.name] || 'idle'
 
       const workerY = teamTop + wi * (NODE_HEIGHT + NODE_GAP)

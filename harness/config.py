@@ -37,6 +37,7 @@ class AgentConfig:
     max_turns: int = 30
     fallback_models: list[str] = field(default_factory=list)
     vision: bool = False
+    only_instances: list[str] = field(default_factory=list)  # empty = all instances
 
 
 @dataclass
@@ -113,6 +114,7 @@ def _parse_agent(data: dict[str, Any]) -> AgentConfig:
         max_turns=data.get("max_turns", 30),
         fallback_models=data.get("fallback_models", []),
         vision=data.get("vision", False),
+        only_instances=data.get("only_instances", []),
     )
 
 

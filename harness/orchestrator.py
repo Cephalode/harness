@@ -81,6 +81,11 @@ class Orchestrator:
         cfg = copy.deepcopy(base_config)
         cfg.name = instance.name
         cfg.instances = []  # instances don't carry over to expanded teams
+        # Filter workers scoped to specific instances
+        cfg.workers = [
+            w for w in cfg.workers
+            if not w.only_instances or instance.name in w.only_instances
+        ]
         # Apply model overrides
         overrides = instance.model_overrides
         if cfg.lead and cfg.lead.name in overrides:

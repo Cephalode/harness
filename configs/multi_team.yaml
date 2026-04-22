@@ -119,6 +119,15 @@ teams:
         domain:
           read: ["."]
           update: ["backend/", "src/api/", "src/models/", "src/services/"]
+      - name: browser_harness_agent
+        model: "z-ai/glm-4.7-flashx"
+        fallback_models:
+          - "opencode-go/qwen3.6-plus"
+          - "z-ai/glm-4.5-flash"
+        system_prompt: agents/browser_harness_agent.md
+        domain:
+          read: ["."]
+          update: ["browser/", "e2e/", "tests/"]
 
   - name: research
     color: cyan

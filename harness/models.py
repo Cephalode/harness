@@ -24,6 +24,16 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "glm-5.1": {"input": 0.0, "output": 0.0},  # Free tier
     "glm-5": {"input": 0.0, "output": 0.0},
     "glm-5-turbo": {"input": 0.0, "output": 0.0},
+    "glm-4.7-flashx": {"input": 0.0, "output": 0.0},
+    "glm-4.7-flash": {"input": 0.0, "output": 0.0},
+    "glm-4.5-flash": {"input": 0.0, "output": 0.0},  # FREE
+    "glm-4.6v": {"input": 0.0, "output": 0.0},  # Vision
+    "glm-4.6v-flash": {"input": 0.0, "output": 0.0},  # FREE vision
+    # OpenCode-go models
+    "kimi-k2.5": {"input": 0.0, "output": 0.0},
+    "minimax-m2.7": {"input": 0.0, "output": 0.0},
+    "qwen3.6-plus": {"input": 0.0, "output": 0.0},
+    "mimo-v2-pro": {"input": 0.0, "output": 0.0},
     # Ollama (local, free)
     "qwen3.5:latest": {"input": 0.0, "output": 0.0},
     # Default
@@ -78,7 +88,9 @@ class CostTracker:
 
     def _calculate_cost(self, model: str, usage: TokenUsage) -> float:
         """Calculate USD cost for given model and usage."""
-        pricing = MODEL_PRICING.get(model, MODEL_PRICING["default"])
+        # Strip provider prefix (e.g. "z-ai/glm-5.1" → "glm-5.1")
+        bare_model = model.split("/")[-1] if "/" in model else model
+        pricing = MODEL_PRICING.get(bare_model, MODEL_PRICING.get(model, MODEL_PRICING["default"]))
         input_cost = (usage.input_tokens / 1_000_000) * pricing["input"]
         output_cost = (usage.output_tokens / 1_000_000) * pricing["output"]
         # Cache tokens are cheaper (10% of input price)

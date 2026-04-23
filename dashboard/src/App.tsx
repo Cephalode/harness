@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react'
 import Sidebar from './components/Sidebar'
 import ActivityFeed from './components/ActivityFeed'
 import SystemDiagram from './components/SystemDiagram'
+import WorkerStatus from './components/WorkerStatus'
 import StatusBar from './components/StatusBar'
 import MessageInput from './components/MessageInput'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useDashboardStore } from './store'
 import './App.css'
 
-type ViewTab = 'activity' | 'diagram'
+type ViewTab = 'activity' | 'diagram' | 'workers'
 
 function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>('activity')
@@ -77,6 +78,16 @@ function App() {
           >
             Diagram
           </button>
+          <button
+            onClick={() => setActiveTab('workers')}
+            className={`flex-1 py-2.5 text-center text-sm font-medium min-h-[44px] ${
+              activeTab === 'workers'
+                ? 'text-teal-300 border-b-2 border-teal-400'
+                : 'text-gray-500'
+            }`}
+          >
+            Workers
+          </button>
         </div>
 
         {/* Desktop header: single row */}
@@ -110,6 +121,12 @@ function App() {
             className={`px-3 py-1 rounded ${activeTab === 'diagram' ? 'bg-blue-900 text-blue-300' : 'text-gray-500 hover:text-gray-300'}`}
           >
             Diagram
+          </button>
+          <button
+            onClick={() => setActiveTab('workers')}
+            className={`px-3 py-1 rounded ${activeTab === 'workers' ? 'bg-teal-900 text-teal-300' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            Workers
           </button>
         </div>
       </header>
@@ -159,7 +176,7 @@ function App() {
             className="flex-1 overflow-y-auto p-2 md:p-4"
             style={{ background: 'var(--bg-primary)' }}
           >
-            {activeTab === 'activity' ? <ActivityFeed /> : <SystemDiagram />}
+            {activeTab === 'activity' ? <ActivityFeed /> : activeTab === 'diagram' ? <SystemDiagram /> : <WorkerStatus />}
           </div>
           <MessageInput />
         </main>

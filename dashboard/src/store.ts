@@ -16,6 +16,14 @@ export interface AgentNode {
   status: string
 }
 
+export interface WorkerStatusEntry {
+  agent: string
+  message: string
+  timestamp: number
+  team: string | null
+  task: string | null
+}
+
 export interface TeamNode {
   name: string
   color: string
@@ -58,17 +66,22 @@ interface DashboardState {
   // Session
   session: SessionData | null
 
-  // Agent status tracking (agent_name -> status)
-  agentStatuses: Record<string, string>
+ // Agent status tracking (agent_name -> status)
+ agentStatuses: Record<string, string>
 
-  // Actions
+  // Worker status tracking (agent_name -> WorkerStatusEntry)
+  workerStatuses: Record<string, WorkerStatusEntry>
+
+ // Actions
   setConnected: (connected: boolean) => void
   setTeamData: (data: TeamData) => void
   addEvent: (event: HarnessEvent) => void
   setCosts: (costs: CostData) => void
   setSession: (session: SessionData) => void
-  updateAgentStatus: (agent: string, status: string) => void
-  clearEvents: () => void
+ updateAgentStatus: (agent: string, status: string) => void
+  setWorkerStatuses: (statuses: Record<string, WorkerStatusEntry>) => void
+  updateWorkerStatus: (agent: string, status: WorkerStatusEntry) => void
+ clearEvents: () => void
 }
 
 const MAX_EVENTS = 500
@@ -81,6 +94,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   costs: null,
   session: null,
   agentStatuses: {},
+ workerStatuses: {},
 
   setConnected: (connected) => set({ connected }),
   setTeamData: (teamData) => set({ teamData }),
@@ -96,12 +110,28 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       else if (event.type === 'agent_end') statuses[event.agent] = 'done'
       else if (event.type === 'agent_error') statuses[event.agent] = 'error'
     }
-    return { events, agentStatuses: statuses }
+    // Derive worker status from event
+    let workerStatuses = state.workerStatuses
+    if (event.type === 'worker_status' && event.agent) {
+      workerStatuses = { ...state.workerStatuses }
+      workerStatuses[event.agent] = {
+        agent: event.agent,
+        message: (event.data.message as string) || 'Working...',
+        timestamp: event.timestamp,
+        team: event.team,
+        task: (event.data.task as string) || null,
+      }
+    }
+    return { events, agentStatuses: statuses, workerStatuses }
   }),
   setCosts: (costs) => set({ costs }),
   setSession: (session) => set({ session }),
-  updateAgentStatus: (agent, status) => set((state) => ({
-    agentStatuses: { ...state.agentStatuses, [agent]: status },
-  })),
-  clearEvents: () => set({ events: [] }),
+ updateAgentStatus: (agent, status) => set((state) => ({
+   agentStatuses: { ...state.agentStatuses, [agent]: status },
+ })),
+ setWorkerStatuses: (workerStatuses) => set({ workerStatuses }),
+ updateWorkerStatus: (agent, status) => set((state) => ({
+   workerStatuses: { ...state.workerStatuses, [agent]: status },
+ })),
+ clearEvents: () => set({ events: [] }),
 }))

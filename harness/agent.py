@@ -154,20 +154,6 @@ class Agent:
             if not result.get("error") and result.get("result", "").strip():
                 if self.event_bus:
                     self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"model": result.get("model", model), "status": "success", "result_length": len(result.get("result", ""))}))
-                # Parse and emit worker status updates
-                if self.event_bus and result.get("result"):
-                    result_text = result["result"]
-                    if isinstance(result_text, str):
-                        status_matches = STATUS_BLOCK_PATTERN.findall(result_text)
-                        for status_msg in status_matches:
-                            self.event_bus.emit(HarnessEvent(
-                                "worker_status",
-                                agent=self.name,
-                                team=self.team_name,
-                                data={"message": status_msg.strip()},
-                            ))
-                        # Clean status blocks from result
-                        result["result"] = STATUS_BLOCK_PATTERN.sub("", result_text).strip()
                 return result
 
             # Failure but no more models to try
@@ -186,7 +172,9 @@ class Agent:
     async def _execute_pi(
         self, cmd: list[str], prompt_text: str, timeout: int,
     ) -> dict[str, Any]:
-        """Execute pi CLI command with prompt piped via stdin, parse JSONL output."""
+        """Execute pi CLI command with prompt piped via stdin, parse JSONL
+        output in real-time, emitting worker_status events as status blocks
+        appear during execution."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -195,65 +183,128 @@ class Agent:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.base_dir,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=prompt_text.encode("utf-8")),
-                timeout=timeout,
-            )
+        except Exception as exc:
+            return {
+                "error": f"spawn failed: {exc}",
+                "result": f"Agent {self.name} failed to start: {exc}",
+                "usage": {},
+            }
+
+        # Write prompt to stdin and close it
+        try:
+            proc.stdin.write(prompt_text.encode("utf-8"))  # type: ignore[union-attr]
+            await proc.stdin.drain()  # type: ignore[union-attr]
+            proc.stdin.close()  # type: ignore[union-attr]
+        except Exception as exc:
+            proc.kill()
+            return {
+                "error": f"stdin write failed: {exc}",
+                "result": f"Agent {self.name} stdin error: {exc}",
+                "usage": {},
+            }
+
+        # Stream stdout line-by-line with overall timeout
+        result_text = ""
+        usage_data: dict[str, Any] = {}
+        model_used = self.model
+        provider = ""
+        streaming_text = ""
+        emitted_statuses: set[str] = set()
+        stderr_chunks: list[str] = []
+
+        async def _drain_stderr() -> None:
+            if proc.stderr:
+                while True:
+                    chunk = await proc.stderr.read(4096)
+                    if not chunk:
+                        break
+                    stderr_chunks.append(chunk.decode("utf-8", errors="replace"))
+
+        try:
+            stderr_task = asyncio.create_task(_drain_stderr())
+
+            async def _stream_stdout() -> None:
+                nonlocal result_text, usage_data, model_used, provider, streaming_text
+                if proc.stdout is None:
+                    return
+                async for raw_line in proc.stdout:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                        event_type = event.get("type", "")
+
+                        if event_type == "message_update":
+                            ame = event.get("assistantMessageEvent", {})
+                            if ame.get("type") == "text_delta":
+                                delta = ame.get("text", "")
+                                streaming_text += delta
+                                # Real-time status block detection
+                                if self.event_bus and "```status" in streaming_text:
+                                    matches = STATUS_BLOCK_PATTERN.findall(streaming_text)
+                                    for status_msg in matches:
+                                        status_key = status_msg.strip()
+                                        if status_key not in emitted_statuses:
+                                            emitted_statuses.add(status_key)
+                                            self.event_bus.emit(HarnessEvent(
+                                                "worker_status",
+                                                agent=self.name,
+                                                team=self.team_name,
+                                                data={"message": status_key},
+                                            ))
+
+                        elif event_type == "agent_end":
+                            messages = event.get("messages", [])
+                            for msg in messages:
+                                if msg.get("role") == "assistant":
+                                    for content in msg.get("content", []):
+                                        if content.get("type") == "text":
+                                            result_text = content.get("text", "")
+
+                        elif event_type == "turn_end":
+                            msg = event.get("message", {})
+                            usage_data = msg.get("usage", {})
+                            model_used = msg.get("model", model_used)
+                            provider = msg.get("provider", "")
+
+                    except json.JSONDecodeError:
+                        if not result_text:
+                            result_text = line
+
+            await asyncio.wait_for(_stream_stdout(), timeout=timeout)
+
+            # Wait for process exit (short extra wait)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=30)
+            except asyncio.TimeoutError:
+                proc.kill()
+
+            await stderr_task
+
         except asyncio.TimeoutError:
-            proc.kill()  # type: ignore
+            proc.kill()
             return {
                 "error": "timeout",
                 "result": f"Agent {self.name} timed out after {timeout}s",
                 "usage": {},
             }
 
-        stdout_text = stdout.decode("utf-8", errors="replace").strip()
-        stderr_text = stderr.decode("utf-8", errors="replace").strip()
+        stderr_text = "".join(stderr_chunks).strip()
 
         if proc.returncode != 0:
             return {
                 "error": f"exit code {proc.returncode}",
-                "result": stderr_text or stdout_text,
+                "result": stderr_text or streaming_text,
                 "usage": {},
             }
 
-        # Parse PI's JSONL output (newline-delimited JSON events)
-        result_text = ""
-        usage_data = {}
-        model_used = self.model
-        provider = ""
-
-        for line in stdout_text.split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-                event_type = event.get("type", "")
-
-                if event_type == "agent_end":
-                    # Extract final assistant message text
-                    messages = event.get("messages", [])
-                    for msg in messages:
-                        if msg.get("role") == "assistant":
-                            for content in msg.get("content", []):
-                                if content.get("type") == "text":
-                                    result_text = content.get("text", "")
-
-                elif event_type == "turn_end":
-                    # Extract usage/cost from the final message
-                    msg = event.get("message", {})
-                    usage_data = msg.get("usage", {})
-                    model_used = msg.get("model", model_used)
-                    provider = msg.get("provider", "")
-
-            except json.JSONDecodeError:
-                # If we can't parse JSON, the text mode output is the result
-                if not result_text:
-                    result_text = line
+        # Strip status blocks from final result
+        if result_text:
+            result_text = STATUS_BLOCK_PATTERN.sub("", result_text).strip()
 
         if not result_text:
-            result_text = stdout_text
+            result_text = streaming_text or ""
 
         # Build output dict (similar to claude format for compatibility)
         output = {

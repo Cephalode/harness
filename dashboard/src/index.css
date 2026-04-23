@@ -20,6 +20,7 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
 }
 
 #root {
@@ -32,3 +33,21 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Mobile touch improvements */
+@media (max-width: 767px) {
+  /* Prevent pull-to-refresh on the dashboard */
+  html, body {
+    overscroll-behavior: none;
+  }
+
+  /* Ensure tap targets are reasonable */
+  button, a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Smoother scrolling on iOS */
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+}

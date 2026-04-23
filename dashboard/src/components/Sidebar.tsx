@@ -18,10 +18,14 @@ function AgentRow({ agent, depth }: { agent: AgentNode; depth: number }) {
   const agentStatuses = useDashboardStore((s) => s.agentStatuses)
   const status = agentStatuses[agent.name] || agent.status || 'idle'
   return (
-    <div className="flex items-center gap-2 py-1 px-2 text-sm hover:bg-white/5 rounded cursor-pointer"
-         style={{ paddingLeft: `${depth * 16 + 8}px` }}>
-      <span className="w-2 h-2 rounded-full flex-shrink-0"
-            style={{ backgroundColor: statusColors[status] || statusColors.idle }} />
+    <div
+      className="flex items-center gap-2 py-1.5 px-2 text-sm hover:bg-white/5 rounded cursor-pointer min-h-[32px] md:min-h-0 md:py-1"
+      style={{ paddingLeft: `${depth * 16 + 8}px` }}
+    >
+      <span
+        className="w-2 h-2 rounded-full flex-shrink-0"
+        style={{ backgroundColor: statusColors[status] || statusColors.idle }}
+      />
       <span className="truncate">{agent.name}</span>
       {agent.vision && <span className="text-xs text-purple-400">👁</span>}
       <span className="text-xs text-gray-600 ml-auto truncate max-w-20">

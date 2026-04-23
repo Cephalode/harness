@@ -31,12 +31,21 @@ export default function StatusBar() {
   const outTok = costs?.total_usage?.output_tokens ?? 0
 
   return (
-    <footer className="flex items-center justify-between px-4 py-1.5 text-xs border-t"
-            style={{ borderColor: 'var(--border)', background: 'var(--bg-sidebar)' }}>
+    <footer
+      className="
+        /* Mobile: 2-row stacked layout */
+        flex flex-col gap-0.5 px-3 py-1.5 text-xs border-t
+        /* Desktop: single-row */
+        md:flex-row md:items-center md:justify-between md:px-4 md:py-1.5 md:gap-0
+      "
+      style={{ borderColor: 'var(--border)', background: 'var(--bg-sidebar)' }}
+    >
+      {/* Top row / Left side: Session + Events */}
       <div className="flex items-center gap-4 text-gray-500">
         <span>Session: {session?.session_id?.slice(0, 8) ?? '---'}</span>
         <span>Events: {events.length}</span>
       </div>
+      {/* Bottom row / Right side: Cost + Tokens */}
       <div className="flex items-center gap-4 text-gray-500">
         <span>Cost: ${cost.toFixed(4)}</span>
         <span>Tokens: {inTok.toLocaleString()} in / {outTok.toLocaleString()} out</span>

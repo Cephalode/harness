@@ -23,6 +23,95 @@ class MessageRequest(BaseModel):
     message: str
 
 
+class EventPayload(BaseModel):
+    """Payload for incoming events from external processes (via DashboardRelay)."""
+    type: str
+    agent: str | None = None
+    team: str | None = None
+    data: dict[str, Any] = {}
+    timestamp: float = 0.0
+
+
+class AgentStatusTracker:
+    """Tracks agent statuses derived from the event stream."""
+
+    def __init__(self) -> None:
+        self._statuses: dict[str, str] = {}
+
+    def process_event(self, event: HarnessEvent) -> None:
+        """Update status based on event type."""
+        if not event.agent:
+            return
+        if event.type == "agent_start":
+            self._statuses[event.agent] = "running"
+        elif event.type == "agent_end":
+            self._statuses[event.agent] = "done"
+        elif event.type == "agent_error":
+            self._statuses[event.agent] = "error"
+
+    def get_status(self, agent_name: str) -> str:
+        """Get the current status of an agent."""
+        return self._statuses.get(agent_name, "idle")
+
+    def get_all_statuses(self) -> dict[str, str]:
+        """Get a copy of all agent statuses."""
+        return dict(self._statuses)
+
+
+class WorkerStatusEntry:
+    """Latest status for a single worker."""
+    def __init__(self):
+        self.message: str = "Idle"
+        self.timestamp: float = 0.0
+        self.team: str | None = None
+        self.task: str | None = None
+
+    def to_dict(self, agent_name: str) -> dict:
+        return {
+            "agent": agent_name,
+            "message": self.message,
+            "timestamp": self.timestamp,
+            "team": self.team,
+            "task": self.task,
+        }
+
+
+class WorkerStatusTracker:
+    """Tracks the latest status message from each worker."""
+    def __init__(self):
+        self._statuses: dict[str, WorkerStatusEntry] = {}
+
+    def process_event(self, event: HarnessEvent) -> None:
+        if not event.agent:
+            return
+        name = event.agent
+        if name not in self._statuses:
+            self._statuses[name] = WorkerStatusEntry()
+
+        entry = self._statuses[name]
+        entry.timestamp = event.timestamp
+
+        if event.type == "worker_status":
+            entry.message = event.data.get("message", "Working...")
+            entry.team = event.team or entry.team
+            entry.task = event.data.get("task", entry.task)
+        elif event.type == "agent_start":
+            entry.message = "Starting..."
+            entry.team = event.team or entry.team
+        elif event.type == "agent_end":
+            status = event.data.get("status", "")
+            if status == "success":
+                entry.message = "Completed"
+            else:
+                entry.message = f"Finished ({status})"
+
+    def get_all(self) -> list[dict]:
+        return [entry.to_dict(name) for name, entry in self._statuses.items()]
+
+    def get_all_dict(self) -> dict[str, dict]:
+        return {name: entry.to_dict(name) for name, entry in self._statuses.items()}
+
+
 def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     app = FastAPI(title="Harness Dashboard")
 
@@ -37,6 +126,8 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
         session=session,
         event_bus=event_bus,
     )
+    status_tracker = AgentStatusTracker()
+    worker_status_tracker = WorkerStatusTracker()
 
     @app.get("/api/teams")
     async def get_teams() -> dict[str, Any]:
@@ -48,16 +139,24 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
                     "name": wname,
                     "model": worker.model,
                     "vision": worker.config.vision,
-                    "status": "idle",
+                    "status": status_tracker.get_status(wname),
                 })
             teams.append({
                 "name": name,
                 "color": team.color,
-                "lead": {"name": team.lead.name, "model": team.lead.model},
+                "lead": {
+                    "name": team.lead.name,
+                    "model": team.lead.model,
+                    "status": status_tracker.get_status(team.lead.name),
+                },
                 "workers": workers,
             })
         return {
-            "orchestrator": {"name": orchestrator.agent.name, "model": orchestrator.agent.model},
+            "orchestrator": {
+                "name": orchestrator.agent.name,
+                "model": orchestrator.agent.model,
+                "status": status_tracker.get_status(orchestrator.agent.name),
+            },
             "teams": teams,
         }
 
@@ -86,19 +185,67 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
         events = event_bus.get_history(since)
         return [json.loads(e.to_json()) for e in events]
 
+    @app.post("/api/events")
+    async def receive_event(payload: EventPayload) -> dict[str, Any]:
+        """Receive an event from an external process (e.g. Discord orchestrator).
+
+        This is the ingress point for the DashboardRelay. The event is injected
+        into the local EventBus so it gets broadcast to all WebSocket clients.
+        """
+        ts = payload.timestamp if payload.timestamp > 0 else time.time()
+        event = HarnessEvent(
+            type=payload.type,
+            agent=payload.agent,
+            team=payload.team,
+            data=payload.data,
+            timestamp=ts,
+        )
+        # Update status tracker before emitting so status is ready when
+        # WebSocket clients process the event.
+        status_tracker.process_event(event)
+        worker_status_tracker.process_event(event)
+        event_bus.emit(event)
+        return {"ok": True}
+
+    @app.post("/api/events/batch")
+    async def receive_events(payloads: list[EventPayload]) -> dict[str, Any]:
+        """Receive a batch of events from an external process."""
+        for payload in payloads:
+            ts = payload.timestamp if payload.timestamp > 0 else time.time()
+            event = HarnessEvent(
+                type=payload.type,
+                agent=payload.agent,
+                team=payload.team,
+                data=payload.data,
+                timestamp=ts,
+            )
+            status_tracker.process_event(event)
+            worker_status_tracker.process_event(event)
+            event_bus.emit(event)
+        return {"ok": True, "count": len(payloads)}
+
     @app.post("/api/message")
     async def send_message(req: MessageRequest) -> dict[str, Any]:
         result = await orchestrator.process_message(req.message)
         return {"response": result}
+
+    @app.get("/api/worker-statuses")
+    async def get_worker_statuses() -> dict[str, Any]:
+        return {"workers": worker_status_tracker.get_all()}
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:
         await ws.accept()
         queue = event_bus.subscribe()
         try:
-            # Send team tree on connect
+            # Send team tree + current agent statuses on connect
             teams_data = await get_teams()
-            await ws.send_json({"type": "init", "data": teams_data})
+            await ws.send_json({
+                "type": "init",
+                "data": teams_data,
+                "agent_statuses": status_tracker.get_all_statuses(),
+                "worker_statuses": worker_status_tracker.get_all_dict(),
+            })
             # Stream events
             while True:
                 event = await queue.get()
@@ -116,6 +263,8 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     app.state.event_bus = event_bus
     app.state.cost_tracker = cost_tracker
     app.state.session = session
+    app.state.status_tracker = status_tracker
+    app.state.worker_status_tracker = worker_status_tracker
 
     return app
 

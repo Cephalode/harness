@@ -15,7 +15,6 @@ import '@xyflow/react/dist/style.css'
 import { useDashboardStore } from '../store'
 
 // --- Layout constants ---
-const NODE_WIDTH = 160
 const NODE_HEIGHT = 80
 const LEVEL_GAP = 250 // horizontal gap between hierarchy levels
 const NODE_GAP = 20 // vertical gap between sibling nodes

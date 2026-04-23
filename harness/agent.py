@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shlex
 from typing import Any
 
@@ -14,6 +15,8 @@ from .events import EventBus, HarnessEvent
 from .models import CostTracker, TokenUsage, parse_usage_from_pi_output
 from .session import Session
 from .skills import SkillLoader
+
+STATUS_BLOCK_PATTERN = re.compile(r"```status\s*\nmessage:\s*(.+?)\n```", re.DOTALL)
 
 
 class Agent:
@@ -73,6 +76,23 @@ class Agent:
 
         # Inject domain rules
         parts.append(self.domain_enforcer.format_domain_rules())
+
+        # Inject status reporting instruction
+        parts.append(
+            "## Status Reporting\n\n"
+            "You are running inside a multi-agent orchestration harness with a live dashboard. "
+            "When you begin working on a NEW subtask or phase of your work, output a status line "
+            "in this exact format at the START of your response (before any other output):\n\n"
+            "```status\n"
+            "message: <brief description of what you're about to do>\n"
+            "```\n\n"
+            "For example:\n"
+            "- ```status\nmessage: Reading the main.py file to understand the codebase\n```\n"
+            "- ```status\nmessage: Writing unit tests for the auth module\n```\n"
+            "- ```status\nmessage: Analyzing the error log to find root cause\n```\n\n"
+            "This status is displayed on a live dashboard so your operator can see what you're doing. "
+            "Always emit a status update when your focus shifts to a new activity."
+        )
 
         return "\n\n---\n\n".join(parts)
 
@@ -134,6 +154,20 @@ class Agent:
             if not result.get("error") and result.get("result", "").strip():
                 if self.event_bus:
                     self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"model": result.get("model", model), "status": "success", "result_length": len(result.get("result", ""))}))
+                # Parse and emit worker status updates
+                if self.event_bus and result.get("result"):
+                    result_text = result["result"]
+                    if isinstance(result_text, str):
+                        status_matches = STATUS_BLOCK_PATTERN.findall(result_text)
+                        for status_msg in status_matches:
+                            self.event_bus.emit(HarnessEvent(
+                                "worker_status",
+                                agent=self.name,
+                                team=self.team_name,
+                                data={"message": status_msg.strip()},
+                            ))
+                        # Clean status blocks from result
+                        result["result"] = STATUS_BLOCK_PATTERN.sub("", result_text).strip()
                 return result
 
             # Failure but no more models to try

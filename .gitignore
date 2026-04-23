@@ -10,3 +10,4 @@ build/
 .venv/
 dashboard/node_modules/
 dashboard/dist/
+.env

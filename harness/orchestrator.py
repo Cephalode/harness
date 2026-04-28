@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .agent import Agent
 from .config import HarnessConfig, TeamConfig, TeamInstanceConfig
@@ -13,6 +13,9 @@ from .events import EventBus, HarnessEvent
 from .models import CostTracker
 from .session import Session
 from .team import Team
+
+if TYPE_CHECKING:
+    from .state import StateStore
 
 
 # Module-level patterns for detecting image references in user messages
@@ -35,12 +38,14 @@ class Orchestrator:
         cost_tracker: CostTracker | None = None,
         session: Session | None = None,
         event_bus: EventBus | None = None,
+        state_store: StateStore | None = None,
     ) -> None:
         self.config = config
         self.base_dir = config.base_dir
         self.cost_tracker = cost_tracker or CostTracker()
         self.session = session or Session(sessions_dir=str(self._resolve_path("sessions")))
         self.event_bus = event_bus
+        self.state_store = state_store
 
         # Create orchestrator agent
         self.agent = Agent(
@@ -130,6 +135,9 @@ class Orchestrator:
             role="user",
             content=user_message,
         )
+
+        if self.state_store:
+            await self.state_store.set_task(user_message[:500], platform="cli")
 
         if self.event_bus:
             self.event_bus.emit(HarnessEvent("session_start", data={"message": user_message[:200]}))
@@ -264,6 +272,9 @@ class Orchestrator:
 
         if self.event_bus:
             self.event_bus.emit(HarnessEvent("session_end", data={"response_length": len(final_response)}))
+
+        if self.state_store:
+            await self.state_store.clear_task()
 
         return final_response
 

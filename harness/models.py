@@ -29,6 +29,7 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "glm-4.5-flash": {"input": 0.0, "output": 0.0},  # FREE
     "glm-4.6v": {"input": 0.0, "output": 0.0},  # Vision
     "glm-4.6v-flash": {"input": 0.0, "output": 0.0},  # FREE vision
+    "glm-4.7v": {"input": 0.0, "output": 0.0},  # Vision
     # OpenCode-go models
     "kimi-k2.5": {"input": 0.0, "output": 0.0},
     "minimax-m2.7": {"input": 0.0, "output": 0.0},

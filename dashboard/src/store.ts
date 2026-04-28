@@ -59,6 +59,18 @@ export interface TaskState {
   status: string
 }
 
+export interface QueueStatus {
+  queue_length: number
+  is_processing: boolean
+  current_task: {
+    task_id: string
+    message: string
+    status: string
+    started_at: number
+  } | null
+  total_processed: number
+}
+
 export interface SessionData {
   session_id: string
   message_count: number
@@ -94,6 +106,9 @@ interface DashboardState {
   // Current task from StateStore REST API
   currentTask: TaskState | null
 
+  // Queue status from async task queue
+  queueStatus: QueueStatus | null
+
  // Actions
   setConnected: (connected: boolean) => void
   setTeamData: (data: TeamData) => void
@@ -105,7 +120,8 @@ interface DashboardState {
   updateWorkerStatus: (agent: string, status: WorkerStatusEntry) => void
   setPersistedAgents: (agents: Record<string, PersistedAgentState>) => void
   setCurrentTask: (task: TaskState | null) => void
- clearEvents: () => void
+  setQueueStatus: (status: QueueStatus) => void
+  clearEvents: () => void
 }
 
 const MAX_EVENTS = 500
@@ -121,6 +137,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
  workerStatuses: {},
   persistedAgents: {},
   currentTask: null,
+  queueStatus: null,
 
   setConnected: (connected) => set({ connected }),
   setTeamData: (teamData) => set({ teamData }),
@@ -161,5 +178,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
  })),
   setPersistedAgents: (persistedAgents) => set({ persistedAgents }),
   setCurrentTask: (currentTask) => set({ currentTask }),
- clearEvents: () => set({ events: [] }),
+  setQueueStatus: (queueStatus) => set({ queueStatus }),
+  clearEvents: () => set({ events: [] }),
 }))

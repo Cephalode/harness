@@ -20,6 +20,7 @@ from .events import EventBus, HarnessEvent
 from .models import CostTracker
 from .orchestrator import Orchestrator
 from .rate_limiter import ConcurrencyLimiter
+from .task_queue import TaskQueue
 from .session import Session
 from .state import StateStore
 
@@ -120,9 +121,20 @@ class WorkerStatusTracker:
 def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     app = FastAPI(title="Harness Dashboard")
 
+    task_queue: TaskQueue | None = None
+
     @app.on_event("startup")
-    async def init_state():
+    async def on_startup():
+        nonlocal task_queue
         await state_store.init()
+        task_queue = TaskQueue(orchestrator, event_bus)
+        await task_queue.start()
+        app.state.task_queue = task_queue
+
+    @app.on_event("shutdown")
+    async def on_shutdown():
+        if task_queue:
+            await task_queue.stop()
 
     # State
     state_store = StateStore(state_dir=str(Path(config_path).parent.parent / "state"))
@@ -245,8 +257,23 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
 
     @app.post("/api/message")
     async def send_message(req: MessageRequest) -> dict[str, Any]:
-        result = await orchestrator.process_message(req.message)
-        return {"response": result}
+        """Enqueue a message for processing. Returns task_id immediately."""
+        task_id = await task_queue.enqueue(req.message, platform="dashboard")
+        return {"task_id": task_id, "status": "queued"}
+
+    @app.get("/api/task/{task_id}")
+    async def get_task_status(task_id: str) -> dict[str, Any]:
+        """Get status/result of a specific task."""
+        result = task_queue.get_result(task_id)
+        if result is None:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": f"Task '{task_id}' not found"}, status_code=404)
+        return result
+
+    @app.get("/api/queue")
+    async def get_queue_status() -> dict[str, Any]:
+        """Get full queue status."""
+        return task_queue.get_status()
 
     @app.get("/api/worker-statuses")
     async def get_worker_statuses() -> dict[str, Any]:

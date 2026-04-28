@@ -17,8 +17,8 @@ interface AgentNode {
 function AgentRow({ agent, depth }: { agent: AgentNode; depth: number }) {
   const agentStatuses = useDashboardStore((s) => s.agentStatuses)
   const persistedAgents = useDashboardStore((s) => s.persistedAgents)
-  const status = agentStatuses[agent.name] || agent.status || 'idle'
   const persisted = persistedAgents[agent.name]
+  const status = agentStatuses[agent.name] || persisted?.status || agent.status || 'idle'
   const isRunning = status === 'running'
 
   return (

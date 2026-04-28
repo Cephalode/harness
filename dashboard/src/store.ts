@@ -176,7 +176,16 @@ export const useDashboardStore = create<DashboardState>((set) => ({
  updateWorkerStatus: (agent, status) => set((state) => ({
    workerStatuses: { ...state.workerStatuses, [agent]: status },
  })),
-  setPersistedAgents: (persistedAgents) => set({ persistedAgents }),
+  setPersistedAgents: (persistedAgents) => set((state) => {
+    // Sync persisted statuses into agentStatuses (but don't override running)
+    const statuses = { ...state.agentStatuses }
+    for (const [name, agent] of Object.entries(persistedAgents)) {
+      if (statuses[name] !== 'running') {
+        statuses[name] = agent.status
+      }
+    }
+    return { persistedAgents, agentStatuses: statuses }
+  }),
   setCurrentTask: (currentTask) => set({ currentTask }),
   setQueueStatus: (queueStatus) => set({ queueStatus }),
   clearEvents: () => set({ events: [] }),

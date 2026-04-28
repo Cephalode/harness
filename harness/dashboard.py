@@ -160,6 +160,10 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     status_tracker = AgentStatusTracker()
     worker_status_tracker = WorkerStatusTracker()
 
+    # Hook trackers into EventBus so internal events also update status
+    event_bus.add_listener(status_tracker.process_event)
+    event_bus.add_listener(worker_status_tracker.process_event)
+
     @app.get("/api/teams")
     async def get_teams() -> dict[str, Any]:
         teams = []

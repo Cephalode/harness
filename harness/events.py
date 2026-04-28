@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from .state import StateStore
@@ -57,12 +57,17 @@ class EventBus:
         self._history: list[HarnessEvent] = []
         self._max_history = max_history
         self._state_store = state_store
+        self._listeners: list[Callable[[HarnessEvent], None]] = []
 
     def subscribe(self) -> asyncio.Queue[HarnessEvent]:
         """Create a new subscriber queue."""
         q: asyncio.Queue[HarnessEvent] = asyncio.Queue()
         self._subscribers.append(q)
         return q
+
+    def add_listener(self, callback: Callable[[HarnessEvent], None]) -> None:
+        """Register a synchronous listener called on every emit."""
+        self._listeners.append(callback)
 
     def unsubscribe(self, q: asyncio.Queue[HarnessEvent]) -> None:
         """Remove a subscriber queue."""
@@ -78,6 +83,8 @@ class EventBus:
             q.put_nowait(event)
         if self._state_store is not None:
             self._state_store.process_event(event)
+        for listener in self._listeners:
+            listener(event)
 
     def get_history(self, since: float = 0.0) -> list[HarnessEvent]:
         """Get events since a timestamp."""

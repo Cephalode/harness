@@ -6,6 +6,7 @@ import WorkerStatus from './components/WorkerStatus'
 import StatusBar from './components/StatusBar'
 import MessageInput from './components/MessageInput'
 import { useWebSocket } from './hooks/useWebSocket'
+import { useStatePolling } from './hooks/useStatePolling'
 import { useDashboardStore } from './store'
 import './App.css'
 
@@ -19,6 +20,9 @@ function App() {
 
   // Connect to WebSocket
   useWebSocket()
+
+  // Poll StateStore REST API for persisted agent state
+  useStatePolling()
 
   // Close mobile drawer on resize to desktop
   useEffect(() => {

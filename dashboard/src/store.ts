@@ -43,6 +43,22 @@ export interface CostData {
   by_team: Record<string, number>
 }
 
+export interface PersistedAgentState {
+  name: string
+  status: string
+  model: string
+  team: string | null
+  last_message: string
+  last_updated: number
+}
+
+export interface TaskState {
+  task: string
+  platform: string
+  started_at: number
+  status: string
+}
+
 export interface SessionData {
   session_id: string
   message_count: number
@@ -72,6 +88,12 @@ interface DashboardState {
   // Worker status tracking (agent_name -> WorkerStatusEntry)
   workerStatuses: Record<string, WorkerStatusEntry>
 
+  // Persisted agent state from StateStore REST API
+  persistedAgents: Record<string, PersistedAgentState>
+
+  // Current task from StateStore REST API
+  currentTask: TaskState | null
+
  // Actions
   setConnected: (connected: boolean) => void
   setTeamData: (data: TeamData) => void
@@ -81,6 +103,8 @@ interface DashboardState {
  updateAgentStatus: (agent: string, status: string) => void
   setWorkerStatuses: (statuses: Record<string, WorkerStatusEntry>) => void
   updateWorkerStatus: (agent: string, status: WorkerStatusEntry) => void
+  setPersistedAgents: (agents: Record<string, PersistedAgentState>) => void
+  setCurrentTask: (task: TaskState | null) => void
  clearEvents: () => void
 }
 
@@ -95,6 +119,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   session: null,
   agentStatuses: {},
  workerStatuses: {},
+  persistedAgents: {},
+  currentTask: null,
 
   setConnected: (connected) => set({ connected }),
   setTeamData: (teamData) => set({ teamData }),
@@ -133,5 +159,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
  updateWorkerStatus: (agent, status) => set((state) => ({
    workerStatuses: { ...state.workerStatuses, [agent]: status },
  })),
+  setPersistedAgents: (persistedAgents) => set({ persistedAgents }),
+  setCurrentTask: (currentTask) => set({ currentTask }),
  clearEvents: () => set({ events: [] }),
 }))

@@ -16,21 +16,37 @@ interface AgentNode {
 
 function AgentRow({ agent, depth }: { agent: AgentNode; depth: number }) {
   const agentStatuses = useDashboardStore((s) => s.agentStatuses)
+  const persistedAgents = useDashboardStore((s) => s.persistedAgents)
   const status = agentStatuses[agent.name] || agent.status || 'idle'
+  const persisted = persistedAgents[agent.name]
+  const isRunning = status === 'running'
+
   return (
     <div
-      className="flex items-center gap-2 py-1.5 px-2 text-sm hover:bg-white/5 rounded cursor-pointer min-h-[32px] md:min-h-0 md:py-1"
+      className={`flex items-center gap-2 py-1.5 px-2 text-sm rounded cursor-pointer min-h-[32px] md:min-h-0 md:py-1 ${isRunning ? 'bg-green-900/20' : 'hover:bg-white/5'}`}
       style={{ paddingLeft: `${depth * 16 + 8}px` }}
     >
       <span
-        className="w-2 h-2 rounded-full flex-shrink-0"
+        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
         style={{ backgroundColor: statusColors[status] || statusColors.idle }}
       />
-      <span className="truncate">{agent.name}</span>
-      {agent.vision && <span className="text-xs text-purple-400">👁</span>}
-      <span className="text-xs text-gray-600 ml-auto truncate max-w-20">
-        {agent.model.split('/').pop()}
+      <div className="flex flex-col min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-white">{agent.name}</span>
+          <span className="text-xs text-gray-600 truncate max-w-20">
+            {agent.model.split('/').pop()}
+          </span>
+        </div>
+        {(isRunning || persisted?.last_message) && (
+          <span className="text-xs text-gray-500 truncate">
+            {isRunning ? 'Running...' : persisted?.last_message?.slice(0, 60)}
+          </span>
+        )}
+      </div>
+      <span className={`text-xs ml-auto flex-shrink-0 ${status === 'running' ? 'text-green-400' : status === 'done' ? 'text-blue-400' : status === 'error' ? 'text-red-400' : 'text-gray-600'}`}>
+        {status}
       </span>
+      {agent.vision && <span className="text-xs text-purple-400 flex-shrink-0">👁</span>}
     </div>
   )
 }

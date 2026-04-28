@@ -16,14 +16,18 @@ function eventLabel(type: string): string {
     agent_start: '⚡ Agent Started',
     agent_end: '✓ Agent Finished',
     agent_error: '❌ Agent Error',
+    task_queued: '📥 Task Queued',
+    task_started: '▶️ Task Started',
+    task_completed: '✅ Task Completed',
+    task_failed: '❌ Task Failed',
   }
   return labels[type] || type
 }
 
 function eventColor(type: string): string {
-  if (type.includes('error')) return 'var(--status-error)'
-  if (type.includes('start')) return 'var(--status-running)'
-  if (type.includes('end') || type.includes('done')) return 'var(--status-done)'
+  if (type.includes('error') || type === 'task_failed') return 'var(--status-error)'
+  if (type.includes('start') || type === 'task_started' || type === 'task_queued') return 'var(--status-running)'
+  if (type.includes('end') || type.includes('done') || type === 'task_completed') return 'var(--status-done)'
   return 'var(--text-dim)'
 }
 

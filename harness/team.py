@@ -11,6 +11,7 @@ from .config import TeamConfig
 from .delegate import DelegationTool
 from .events import EventBus, HarnessEvent
 from .models import CostTracker
+from .rate_limiter import ConcurrencyLimiter
 from .session import Session
 
 
@@ -52,6 +53,7 @@ class Team:
         base_dir: str = ".",
         session: Session | None = None,
         event_bus: EventBus | None = None,
+        rate_limiter: ConcurrencyLimiter | None = None,
     ) -> None:
         self.config = config
         self.name = config.name
@@ -60,6 +62,7 @@ class Team:
         self.base_dir = base_dir
         self.session = session
         self.event_bus = event_bus
+        self.rate_limiter = rate_limiter
 
         # Create lead agent
         self.lead = Agent(
@@ -69,6 +72,7 @@ class Team:
             base_dir=base_dir,
             session=session,
             event_bus=event_bus,
+            rate_limiter=rate_limiter,
         )
 
         # Create worker agents
@@ -81,6 +85,7 @@ class Team:
                 base_dir=base_dir,
                 session=session,
                 event_bus=event_bus,
+                rate_limiter=rate_limiter,
             )
             self.workers[wcfg.name] = worker
 

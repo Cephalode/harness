@@ -18,6 +18,7 @@ from .events import DashboardRelay, EventBus
 from .expertise import ExpertiseManager
 from .models import CostTracker
 from .orchestrator import Orchestrator
+from .rate_limiter import ConcurrencyLimiter
 from .session import Session
 from .state import StateStore
 
@@ -52,6 +53,7 @@ class HarnessCLI:
             console.print(f"[yellow]⚠ {w}[/yellow]")
 
         cost_tracker = CostTracker()
+        rate_limiter = ConcurrencyLimiter()
         self.session = Session(sessions_dir=str(Path(self.base_dir) / "sessions"))
         self._state_store = StateStore(state_dir=str(Path(self.base_dir) / "state"))
         asyncio.run(self._state_store.init())
@@ -62,6 +64,7 @@ class HarnessCLI:
             session=self.session,
             event_bus=self._event_bus,
             state_store=self._state_store,
+            rate_limiter=rate_limiter,
         )
         # Start the relay (non-blocking, fails gracefully if dashboard not running)
         self._relay = DashboardRelay(self._event_bus)

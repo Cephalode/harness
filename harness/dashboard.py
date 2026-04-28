@@ -19,6 +19,7 @@ from .config import load_config, validate_config
 from .events import EventBus, HarnessEvent
 from .models import CostTracker
 from .orchestrator import Orchestrator
+from .rate_limiter import ConcurrencyLimiter
 from .session import Session
 from .state import StateStore
 
@@ -130,6 +131,7 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     event_bus = EventBus(state_store=state_store)
     config = load_config(config_path)
     cost_tracker = CostTracker()
+    rate_limiter = ConcurrencyLimiter()
     session = Session(sessions_dir=str(Path(config_path).parent.parent / "sessions"))
     orchestrator = Orchestrator(
         config=config,
@@ -137,6 +139,7 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
         session=session,
         event_bus=event_bus,
         state_store=state_store,
+        rate_limiter=rate_limiter,
     )
     status_tracker = AgentStatusTracker()
     worker_status_tracker = WorkerStatusTracker()
@@ -245,6 +248,11 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     async def get_worker_statuses() -> dict[str, Any]:
         return {"workers": worker_status_tracker.get_all()}
 
+    @app.get("/api/rate-limits")
+    async def get_rate_limits() -> dict[str, Any]:
+        """Current per-model concurrency status from the rate limiter."""
+        return {"models": rate_limiter.get_status()}
+
     # --- State API ---
 
     @app.get("/api/state")
@@ -343,6 +351,7 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     app.state.orchestrator = orchestrator
     app.state.event_bus = event_bus
     app.state.cost_tracker = cost_tracker
+    app.state.rate_limiter = rate_limiter
     app.state.session = session
     app.state.status_tracker = status_tracker
     app.state.worker_status_tracker = worker_status_tracker

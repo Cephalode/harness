@@ -7,16 +7,20 @@ import time
 from pathlib import Path
 from typing import Any
 
+from dataclasses import asdict
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.responses import StreamingResponse
 
 from .config import load_config, validate_config
 from .events import EventBus, HarnessEvent
 from .models import CostTracker
 from .orchestrator import Orchestrator
 from .session import Session
+from .state import StateStore
 
 
 class MessageRequest(BaseModel):
@@ -116,7 +120,14 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     app = FastAPI(title="Harness Dashboard")
 
     # State
-    event_bus = EventBus()
+    state_store = StateStore(state_dir=str(Path(config_path).parent.parent / "state"))
+    # Ensure dirs exist synchronously (async init happens on first access)
+    state_store.state_dir.mkdir(parents=True, exist_ok=True)
+    (state_store.state_dir / "agents").mkdir(exist_ok=True)
+    (state_store.state_dir / "stages").mkdir(exist_ok=True)
+    (state_store.state_dir / "artifacts").mkdir(exist_ok=True)
+
+    event_bus = EventBus(state_store=state_store)
     config = load_config(config_path)
     cost_tracker = CostTracker()
     session = Session(sessions_dir=str(Path(config_path).parent.parent / "sessions"))
@@ -125,6 +136,7 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
         cost_tracker=cost_tracker,
         session=session,
         event_bus=event_bus,
+        state_store=state_store,
     )
     status_tracker = AgentStatusTracker()
     worker_status_tracker = WorkerStatusTracker()
@@ -233,6 +245,75 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     async def get_worker_statuses() -> dict[str, Any]:
         return {"workers": worker_status_tracker.get_all()}
 
+    # --- State API ---
+
+    @app.get("/api/state")
+    async def get_state() -> dict[str, Any]:
+        """Full state snapshot."""
+        return await state_store.snapshot()
+
+    @app.get("/api/state/agents")
+    async def get_state_agents() -> dict[str, Any]:
+        agents = await state_store.get_agents()
+        return {"agents": {name: asdict(a) for name, a in agents.items()}}
+
+    @app.get("/api/state/agents/{name}")
+    async def get_state_agent(name: str) -> dict[str, Any]:
+        agent = await state_store.get_agent(name)
+        if agent is None:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": f"Agent '{name}' not found"}, status_code=404)
+        return asdict(agent)
+
+    @app.get("/api/state/task")
+    async def get_state_task() -> dict[str, Any]:
+        task = await state_store.get_task()
+        return {"task": asdict(task) if task else None}
+
+    @app.get("/api/state/stages")
+    async def get_state_stages() -> dict[str, Any]:
+        stages = await state_store.get_stages()
+        return {"stages": [asdict(s) for s in stages]}
+
+    @app.get("/api/state/events")
+    async def get_state_events(since: float = 0.0) -> dict[str, Any]:
+        events = await state_store.get_events(since)
+        return {"events": events}
+
+    @app.post("/api/state/task")
+    async def set_state_task(req: MessageRequest) -> dict[str, Any]:
+        await state_store.set_task(req.message, platform="external")
+        return {"ok": True}
+
+    @app.post("/api/state/agents/{name}")
+    async def set_state_agent(name: str, status: str = "running") -> dict[str, Any]:
+        await state_store.set_agent_status(name, status)
+        return {"ok": True}
+
+    # --- SSE endpoint for real-time state streaming ---
+
+    @app.get("/api/state/events/stream")
+    async def state_event_stream():
+        """SSE endpoint for real-time state streaming."""
+        async def event_generator():
+            queue = event_bus.subscribe()
+            try:
+                # Send initial snapshot
+                snapshot = await state_store.snapshot()
+                yield f"data: {json.dumps({'type': 'init', 'data': snapshot}, ensure_ascii=False)}\n\n"
+                # Stream events
+                while True:
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=30)
+                        yield f"data: {event.to_json()}\n\n"
+                    except asyncio.TimeoutError:
+                        yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+            except GeneratorExit:
+                pass
+            finally:
+                event_bus.unsubscribe(queue)
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:
         await ws.accept()
@@ -265,6 +346,7 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     app.state.session = session
     app.state.status_tracker = status_tracker
     app.state.worker_status_tracker = worker_status_tracker
+    app.state.state_store = state_store
 
     return app
 

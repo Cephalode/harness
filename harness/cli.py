@@ -14,10 +14,12 @@ from rich.table import Table
 from rich.text import Text
 
 from .config import load_config, validate_config
+from .events import DashboardRelay, EventBus
 from .expertise import ExpertiseManager
 from .models import CostTracker
 from .orchestrator import Orchestrator
 from .session import Session
+from .state import StateStore
 
 
 console = Console()
@@ -33,6 +35,8 @@ class HarnessCLI:
         self.orchestrator: Orchestrator | None = None
         self.session: Session | None = None
         self.base_dir = str(Path(config_path).parent.parent.resolve())
+        self._event_bus: EventBus | None = None
+        self._relay: DashboardRelay | None = None
 
     def _load(self) -> None:
         """Load configuration and initialize orchestrator."""
@@ -49,11 +53,18 @@ class HarnessCLI:
 
         cost_tracker = CostTracker()
         self.session = Session(sessions_dir=str(Path(self.base_dir) / "sessions"))
+        self._state_store = StateStore(state_dir=str(Path(self.base_dir) / "state"))
+        asyncio.run(self._state_store.init())
+        self._event_bus = EventBus(state_store=self._state_store)
         self.orchestrator = Orchestrator(
             config=config,
             cost_tracker=cost_tracker,
             session=self.session,
+            event_bus=self._event_bus,
+            state_store=self._state_store,
         )
+        # Start the relay (non-blocking, fails gracefully if dashboard not running)
+        self._relay = DashboardRelay(self._event_bus)
         console.print(f"[green]✓[/green] Loaded config: {len(self.orchestrator.teams)} teams")
         console.print(f"[green]✓[/green] Session: {self.session.session_id}")
 
@@ -192,25 +203,38 @@ class HarnessCLI:
             console.print("[red]No orchestrator loaded[/red]")
             return
 
-        with console.status("[bold cyan]Orchestrating...[/bold cyan]", spinner="dots"):
-            response = await self.orchestrator.process_message(user_input)
+        # Start the relay for this processing cycle
+        relay_started = False
+        if self._relay:
+            try:
+                await self._relay.start()
+                relay_started = True
+            except Exception:
+                pass  # Dashboard not running — that's fine
 
-        # Display response
-        console.print()
-        console.print(Panel(
-            Markdown(response),
-            title="[bold]Orchestrator[/bold]",
-            border_style="blue",
-        ))
+        try:
+            with console.status("[bold cyan]Orchestrating...[/bold cyan]", spinner="dots"):
+                response = await self.orchestrator.process_message(user_input)
 
-        # Show cost footer
-        cost = self.orchestrator.cost_tracker.total_cost
-        usage = self.orchestrator.cost_tracker.total_usage
-        console.print(
-            f"[dim]Cost: ${cost:.4f} | "
-            f"Tokens: {usage.input_tokens:,} in / {usage.output_tokens:,} out[/dim]"
-        )
-        console.print()
+            # Display response
+            console.print()
+            console.print(Panel(
+                Markdown(response),
+                title="[bold]Orchestrator[/bold]",
+                border_style="blue",
+            ))
+
+            # Show cost footer
+            cost = self.orchestrator.cost_tracker.total_cost
+            usage = self.orchestrator.cost_tracker.total_usage
+            console.print(
+                f"[dim]Cost: ${cost:.4f} | "
+                f"Tokens: {usage.input_tokens:,} in / {usage.output_tokens:,} out[/dim]"
+            )
+            console.print()
+        finally:
+            if relay_started and self._relay:
+                await self._relay.stop()
 
     def run(self) -> None:
         """Main CLI loop."""

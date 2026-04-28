@@ -129,6 +129,16 @@ teams:
         domain:
           read: ["."]
           update: ["browser/", "e2e/", "tests/"]
+      - name: network_engineer
+        model: "z-ai/glm-4.7-flashx"
+        fallback_models:
+          - "opencode-go/qwen3.6-plus"
+          - "z-ai/glm-4.5-flash"
+        system_prompt: agents/network_engineer.md
+        only_instances: [engineering_A]
+        domain:
+          read: ["."]
+          update: ["config/network/", "config/firewall/", "config/dns/", "infra/", "scripts/network/"]
 
   - name: research
     color: cyan
@@ -207,7 +217,7 @@ teams:
           read: ["."]
           update: ["expertise/"]
       - name: visual_reviewer
-        model: "z-ai/glm-4.6v"
+        model: "z-ai/glm-4.7v"
         vision: true
         system_prompt: agents/visual_reviewer.md
         domain:

@@ -13,6 +13,7 @@ from .domain import DomainEnforcer
 from .expertise import ExpertiseManager
 from .events import EventBus, HarnessEvent
 from .models import CostTracker, TokenUsage, parse_usage_from_pi_output
+from .rate_limiter import ConcurrencyLimiter
 from .session import Session
 from .skills import SkillLoader
 
@@ -30,6 +31,7 @@ class Agent:
         base_dir: str = ".",
         session: Session | None = None,
         event_bus: EventBus | None = None,
+        rate_limiter: ConcurrencyLimiter | None = None,
     ) -> None:
         self.config = config
         self.team_name = team_name
@@ -37,6 +39,7 @@ class Agent:
         self.base_dir = base_dir
         self.session = session
         self.event_bus = event_bus
+        self.rate_limiter = rate_limiter
 
         self.domain_enforcer = DomainEnforcer(config.domain, base_dir)
         self.expertise_manager = ExpertiseManager(base_dir)
@@ -148,7 +151,11 @@ class Agent:
             if self.config.domain.update and "." not in self.config.domain.update:
                 cmd.extend(["--tools", "read,bash"])
 
-            result = await self._execute_pi(cmd, prompt, timeout)
+            if self.rate_limiter:
+                async with self.rate_limiter.slot(model, agent_name=self.name, team=self.team_name):
+                    result = await self._execute_pi(cmd, prompt, timeout)
+            else:
+                result = await self._execute_pi(cmd, prompt, timeout)
 
             # Success = no error and non-empty result
             if not result.get("error") and result.get("result", "").strip():

@@ -11,6 +11,7 @@ from .config import HarnessConfig, TeamConfig, TeamInstanceConfig
 from .delegate import DelegationTool
 from .events import EventBus, HarnessEvent
 from .models import CostTracker
+from .rate_limiter import ConcurrencyLimiter
 from .session import Session
 from .team import Team
 
@@ -39,6 +40,7 @@ class Orchestrator:
         session: Session | None = None,
         event_bus: EventBus | None = None,
         state_store: StateStore | None = None,
+        rate_limiter: ConcurrencyLimiter | None = None,
     ) -> None:
         self.config = config
         self.base_dir = config.base_dir
@@ -46,6 +48,7 @@ class Orchestrator:
         self.session = session or Session(sessions_dir=str(self._resolve_path("sessions")))
         self.event_bus = event_bus
         self.state_store = state_store
+        self.rate_limiter = rate_limiter or ConcurrencyLimiter()
 
         # Create orchestrator agent
         self.agent = Agent(
@@ -55,6 +58,7 @@ class Orchestrator:
             base_dir=self.base_dir,
             session=self.session,
             event_bus=event_bus,
+            rate_limiter=self.rate_limiter,
         )
 
         # Create teams (expand instances into separate Team objects)
@@ -71,6 +75,7 @@ class Orchestrator:
                     base_dir=self.base_dir,
                     session=self.session,
                     event_bus=self.event_bus,
+                    rate_limiter=self.rate_limiter,
                 )
                 self.teams[tcfg.name] = team
 
@@ -104,6 +109,7 @@ class Orchestrator:
             base_dir=self.base_dir,
             session=self.session,
             event_bus=self.event_bus,
+            rate_limiter=self.rate_limiter,
         )
 
     def _has_images(self, message: str) -> bool:

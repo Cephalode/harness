@@ -221,6 +221,10 @@ class Orchestrator:
                 content=routing_text,
                 agent="orchestrator",
             )
+            if self.event_bus:
+                self.event_bus.emit(HarnessEvent("session_end", data={"response_length": len(routing_text)}))
+            if self.state_store:
+                await self.state_store.clear_task()
             return routing_text
 
         # Step 2: Execute selected teams in parallel

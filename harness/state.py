@@ -400,7 +400,7 @@ class StateStore:
                 )
 
             elif event_type == "session_start":
-                task_text = event_data.get("task", "")
+                task_text = event_data.get("message", "") or event_data.get("task", "")
                 platform = event_data.get("platform", "")
                 if task_text:
                     await self.set_task(task_text, platform)

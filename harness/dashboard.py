@@ -120,6 +120,10 @@ class WorkerStatusTracker:
 def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     app = FastAPI(title="Harness Dashboard")
 
+    @app.on_event("startup")
+    async def init_state():
+        await state_store.init()
+
     # State
     state_store = StateStore(state_dir=str(Path(config_path).parent.parent / "state"))
     # Ensure dirs exist synchronously (async init happens on first access)

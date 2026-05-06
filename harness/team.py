@@ -89,6 +89,10 @@ class Team:
             )
             self.workers[wcfg.name] = worker
 
+        # Inject delegation context into lead agent so it knows its available workers
+        if self.workers:
+            self.lead.set_available_workers(list(self.workers.keys()))
+
         # Build delegation tool with all team members
         all_agents: dict[str, Agent] = {config.lead.name: self.lead}
         all_agents.update(self.workers)

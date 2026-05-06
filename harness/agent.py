@@ -41,9 +41,15 @@ class Agent:
         self.event_bus = event_bus
         self.rate_limiter = rate_limiter
 
+        self._worker_names: list[str] = []
+
         self.domain_enforcer = DomainEnforcer(config.domain, base_dir)
         self.expertise_manager = ExpertiseManager(base_dir)
         self.skill_loader = SkillLoader(base_dir)
+
+    def set_available_workers(self, names: list[str]) -> None:
+        """Set the list of available worker names for delegation injection."""
+        self._worker_names = names
 
     @property
     def name(self) -> str:
@@ -96,6 +102,23 @@ class Agent:
             "This status is displayed on a live dashboard so your operator can see what you're doing. "
             "Always emit a status update when your focus shifts to a new activity."
         )
+
+        # Inject delegation instructions if workers are configured
+        if self._worker_names:
+            workers_list = "\n".join(f"  - {name}" for name in self._worker_names)
+            parts.append(
+                "## CRITICAL: Delegation Protocol\n\n"
+                "You MUST delegate work to your workers. Do NOT do the work yourself.\n"
+                "To delegate, include fenced code blocks with the `delegate` language tag in your response:\n\n"
+                "```delegate\n"
+                "to: <worker_name>\n"
+                "task: <clear, specific task description>\n"
+                "context: <additional context the agent needs>\n"
+                "```\n\n"
+                f"Your available workers:\n{workers_list}\n\n"
+                "You can include multiple delegation blocks for parallel execution.\n"
+                "ALWAYS use this format to delegate. Do not describe delegation in prose — use the code blocks.\n"
+            )
 
         return "\n\n---\n\n".join(parts)
 
@@ -151,11 +174,14 @@ class Agent:
             if self.config.domain.update and "." not in self.config.domain.update:
                 cmd.extend(["--tools", "read,bash"])
 
-            if self.rate_limiter:
-                async with self.rate_limiter.slot(model, agent_name=self.name, team=self.team_name):
+            try:
+                if self.rate_limiter:
+                    async with self.rate_limiter.slot(model, agent_name=self.name, team=self.team_name):
+                        result = await self._execute_pi(cmd, prompt, timeout)
+                else:
                     result = await self._execute_pi(cmd, prompt, timeout)
-            else:
-                result = await self._execute_pi(cmd, prompt, timeout)
+            except Exception as exc:
+                result = {"error": str(exc), "result": f"Agent {self.name} crashed: {exc}", "usage": {}}
 
             # Success = no error and non-empty result
             if not result.get("error") and result.get("result", "").strip():

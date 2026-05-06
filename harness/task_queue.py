@@ -53,9 +53,11 @@ class TaskQueue:
         self,
         orchestrator: Orchestrator,
         event_bus: EventBus | None = None,
+        state_store: Any | None = None,
     ) -> None:
         self._orchestrator = orchestrator
         self._event_bus = event_bus
+        self._state_store = state_store
         self._queue: asyncio.Queue[QueuedTask] = asyncio.Queue()
         self._tasks: dict[str, QueuedTask] = {}
         self._worker_task: asyncio.Task | None = None
@@ -207,6 +209,12 @@ class TaskQueue:
             logger.error("Task %s failed: %s", task.task_id, exc)
 
         finally:
+            # Clear state store task regardless of success/failure
+            if self._state_store:
+                try:
+                    await self._state_store.clear_task()
+                except Exception:
+                    logger.warning("Failed to clear state store task", exc_info=True)
             self._current_task = None
             self._update_positions()
 

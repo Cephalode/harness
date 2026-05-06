@@ -127,7 +127,7 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     async def on_startup():
         nonlocal task_queue
         await state_store.init()
-        task_queue = TaskQueue(orchestrator, event_bus)
+        task_queue = TaskQueue(orchestrator, event_bus, state_store)
         await task_queue.start()
         app.state.task_queue = task_queue
 

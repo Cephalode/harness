@@ -239,6 +239,12 @@ class Orchestrator:
 
         team_results = await asyncio.gather(*team_tasks)
 
+        # Normalize: ensure all results are dicts
+        team_results = [
+            r if isinstance(r, dict) else {"team": "unknown", "final_response": str(r), "workers_used": 0}
+            for r in team_results
+        ]
+
         # Step 3: Synthesize results through orchestrator
         synthesis_context = self._format_team_results(team_results)
 
@@ -315,6 +321,11 @@ class Orchestrator:
         """Format team results for synthesis."""
         parts: list[str] = []
         for r in results:
+            # Guard: ensure r is a dict
+            if isinstance(r, str):
+                r = {"team": "unknown", "final_response": r, "workers_used": 0}
+            elif not isinstance(r, dict):
+                r = {"team": "unknown", "final_response": str(r), "workers_used": 0}
             team_name = r.get("team", "unknown")
             final = r.get("final_response", "No response")
             workers_used = r.get("workers_used", 0)

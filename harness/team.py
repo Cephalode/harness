@@ -221,6 +221,11 @@ class Team:
             parts.append(f"[{self.lead.name}]: {display_text}")
 
         for i, wr in enumerate(worker_results):
+            # Guard: ensure wr is a dict
+            if isinstance(wr, str):
+                wr = {"result": wr}
+            elif not isinstance(wr, dict):
+                wr = {"result": str(wr)}
             worker_text = wr.get("result", "")
             if worker_text:
                 # Truncate very long worker responses

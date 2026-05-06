@@ -67,6 +67,7 @@ class StageState:
 
 async def _atomic_write(path: Path, data: str) -> None:
     """Write *data* to *path* atomically via tmp-file + os.rename."""
+    os.makedirs(path.parent, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     async with aiofiles.open(tmp_path, "w", encoding="utf-8") as fh:
         await fh.write(data)

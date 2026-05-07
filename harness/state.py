@@ -365,7 +365,7 @@ class StateStore:
                     agent_name or "unknown",
                     status,
                     team=team_name,
-                    last_message=event_data.get("summary", ""),
+                    last_message=event_data.get("reason", ""),
                 )
 
             elif event_type == "worker_status":

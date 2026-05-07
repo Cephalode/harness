@@ -51,7 +51,8 @@ class AgentStatusTracker:
         if event.type == "agent_start":
             self._statuses[event.agent] = "running"
         elif event.type == "agent_end":
-            self._statuses[event.agent] = "done"
+            status = event.data.get("status")
+            self._statuses[event.agent] = "error" if status == "error" else "done"
         elif event.type == "agent_error":
             self._statuses[event.agent] = "error"
 

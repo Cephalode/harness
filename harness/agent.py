@@ -181,6 +181,8 @@ class Agent:
                 else:
                     result = await self._execute_pi(cmd, prompt, timeout)
             except Exception as exc:
+                if self.event_bus:
+                    self.event_bus.emit(HarnessEvent("agent_error", agent=self.name, team=self.team_name, data={"error": str(exc), "model": model}))
                 result = {"error": str(exc), "result": f"Agent {self.name} crashed: {exc}", "usage": {}}
 
             # Success = no error and non-empty result
@@ -192,14 +194,14 @@ class Agent:
             # Failure but no more models to try
             if i >= len(models_to_try) - 1:
                 if self.event_bus:
-                    self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "all_models_failed"}))
+                    self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "error", "reason": "all_models_failed"}))
                 return result
 
             # Try next model
             continue
 
         if self.event_bus:
-            self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "all_models_failed"}))
+            self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "error", "reason": "all_models_failed"}))
         return {"error": "all models failed", "result": "All model attempts failed", "usage": {}}
 
     async def _execute_pi(

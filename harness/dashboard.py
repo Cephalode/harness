@@ -208,6 +208,11 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
             "by_team": cost_tracker.cost_by_team(),
         }
 
+    @app.get("/api/slots")
+    async def get_slots() -> dict[str, Any]:
+        """Return current LLM slot allocation status."""
+        return orchestrator.slot_allocator.get_status()
+
     @app.get("/api/session")
     async def get_session_info() -> dict[str, Any]:
         return {

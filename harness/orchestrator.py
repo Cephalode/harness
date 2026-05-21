@@ -10,8 +10,14 @@ from .agent import Agent
 from .config import HarnessConfig, TeamConfig, TeamInstanceConfig
 from .delegate import DelegationTool
 from .events import EventBus, HarnessEvent
+from .images import (
+    extract_image_refs,
+    resolve_image_refs,
+    strip_images_from_message,
+    cleanup_temp_images,
+)
 from .models import CostTracker
-from .rate_limiter import ConcurrencyLimiter
+from .rate_limiter import ConcurrencyLimiter, SlotAllocator
 from .session import Session
 from .team import Team
 
@@ -41,6 +47,7 @@ class Orchestrator:
         event_bus: EventBus | None = None,
         state_store: StateStore | None = None,
         rate_limiter: ConcurrencyLimiter | None = None,
+        slot_allocator: SlotAllocator | None = None,
     ) -> None:
         self.config = config
         self.base_dir = config.base_dir
@@ -49,6 +56,7 @@ class Orchestrator:
         self.event_bus = event_bus
         self.state_store = state_store
         self.rate_limiter = rate_limiter or ConcurrencyLimiter()
+        self.slot_allocator = slot_allocator or SlotAllocator(self.rate_limiter)
 
         # Create orchestrator agent
         self.agent = Agent(
@@ -59,6 +67,7 @@ class Orchestrator:
             session=self.session,
             event_bus=event_bus,
             rate_limiter=self.rate_limiter,
+            slot_allocator=self.slot_allocator,
         )
 
         # Create teams (expand instances into separate Team objects)
@@ -76,6 +85,7 @@ class Orchestrator:
                     session=self.session,
                     event_bus=self.event_bus,
                     rate_limiter=self.rate_limiter,
+                    slot_allocator=self.slot_allocator,
                 )
                 self.teams[tcfg.name] = team
 
@@ -110,11 +120,12 @@ class Orchestrator:
             session=self.session,
             event_bus=self.event_bus,
             rate_limiter=self.rate_limiter,
+            slot_allocator=self.slot_allocator,
         )
 
     def _has_images(self, message: str) -> bool:
         """Check if a message contains image references."""
-        return any(p.search(message) for p in _IMAGE_PATTERNS)
+        return bool(extract_image_refs(message))
 
     def _has_vision_team(self) -> list[str]:
         """Return team names that have at least one vision-capable agent."""
@@ -228,13 +239,27 @@ class Orchestrator:
             return routing_text
 
         # Step 2: Execute selected teams in parallel
+        # Resolve image URLs to local files for vision-capable teams
+        resolved_image_paths: list[str] = []
+        if has_image:
+            image_refs = extract_image_refs(user_message)
+            resolved_image_paths = await resolve_image_refs(image_refs)
+            if resolved_image_paths and self.event_bus:
+                self.event_bus.emit(HarnessEvent("images_resolved", data={
+                    "count": len(resolved_image_paths),
+                    "paths": resolved_image_paths,
+                }))
+
         team_tasks = []
         for team_name in selected_teams:
             team = self.teams.get(team_name)
             if team:
+                # Pass images only to teams that have vision-capable agents
+                team_images = resolved_image_paths if team_name in vision_teams else None
                 team_tasks.append(team.execute(
                     task=user_message,
                     context=f"Orchestrator routed this task to the {team_name} team.",
+                    image_paths=team_images,
                 ))
 
         team_results = await asyncio.gather(*team_tasks)
@@ -291,6 +316,10 @@ class Orchestrator:
 
         if self.state_store:
             await self.state_store.clear_task()
+
+        # Clean up downloaded temp images
+        if resolved_image_paths:
+            cleanup_temp_images(resolved_image_paths)
 
         return final_response
 

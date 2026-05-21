@@ -12,3 +12,10 @@ build/
 dashboard/node_modules/
 dashboard/dist/
 .env
+
+# Test/temp files
+hello.py
+hello.txt
+
+# Compiled binaries
+tui/harness-tui

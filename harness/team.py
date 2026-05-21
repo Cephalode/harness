@@ -11,7 +11,7 @@ from .config import TeamConfig
 from .delegate import DelegationTool
 from .events import EventBus, HarnessEvent
 from .models import CostTracker
-from .rate_limiter import ConcurrencyLimiter
+from .rate_limiter import ConcurrencyLimiter, SlotAllocator
 from .session import Session
 
 
@@ -54,6 +54,7 @@ class Team:
         session: Session | None = None,
         event_bus: EventBus | None = None,
         rate_limiter: ConcurrencyLimiter | None = None,
+        slot_allocator: SlotAllocator | None = None,
     ) -> None:
         self.config = config
         self.name = config.name
@@ -63,6 +64,7 @@ class Team:
         self.session = session
         self.event_bus = event_bus
         self.rate_limiter = rate_limiter
+        self.slot_allocator = slot_allocator
 
         # Create lead agent
         self.lead = Agent(
@@ -73,6 +75,7 @@ class Team:
             session=session,
             event_bus=event_bus,
             rate_limiter=rate_limiter,
+            slot_allocator=slot_allocator,
         )
 
         # Create worker agents
@@ -86,6 +89,7 @@ class Team:
                 session=session,
                 event_bus=event_bus,
                 rate_limiter=rate_limiter,
+                slot_allocator=slot_allocator,
             )
             self.workers[wcfg.name] = worker
 
@@ -108,6 +112,7 @@ class Team:
         context: str = "",
         till_done: bool = True,
         max_rounds: int = 5,
+        image_paths: list[str] | None = None,
     ) -> dict[str, Any]:
         """Execute a task through this team with till-done orchestration.
 
@@ -128,8 +133,22 @@ class Team:
             round_num += 1
 
             if round_num == 1:
+                # If images are provided, tell the lead to delegate analysis
+                # to the visual_reviewer worker (images will be passed directly
+                # to that worker — the lead doesn't need to see them)
+                lead_task = task
+                if image_paths:
+                    vision_workers = [
+                        name for name, w in self.workers.items() if w.config.vision
+                    ]
+                    if vision_workers:
+                        lead_task += (
+                            f"\n\n**IMAGES ATTACHED**: {len(image_paths)} image(s) are attached to this task. "
+                            f"You MUST delegate visual analysis to the `{vision_workers[0]}` worker — "
+                            f"the images will be passed to it automatically."
+                        )
                 lead_result = await self.lead.run(
-                    message=task,
+                    message=lead_task,
                     context=context,
                 )
             else:
@@ -173,10 +192,16 @@ class Team:
             for dep in delegations:
                 target_name = dep["to"]
                 if target_name in self.workers:
+                    worker = self.workers[target_name]
+                    # Pass images only to vision-capable workers
+                    worker_images = None
+                    if image_paths and worker.config.vision:
+                        worker_images = image_paths
                     worker_tasks.append(
-                        self.workers[target_name].run(
+                        worker.run(
                             message=dep["task"],
                             context=dep.get("context", ""),
+                            image_paths=worker_images,
                         )
                     )
 

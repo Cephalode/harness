@@ -1,8 +1,14 @@
-"""Per-model rate limiting for API provider concurrency and rate limits.
+"""Per-model rate limiting for Z.AI API concurrency.
 
-Two provider types:
-- z-ai: hard concurrency limits (simultaneous requests) via asyncio.Semaphore
-- opencode-go: rate limits (requests per time window) via sliding window counter
+Single provider (z-ai) with hard concurrency limits via asyncio.Semaphore.
+SlotAllocator implements rationing: if the preferred model is full, degrades
+to a weaker model with available capacity, queuing only as last resort.
+
+Models:
+  glm-5.1      — flagship (10 concurrent)
+  glm-4.7      — workhorse (2 concurrent)
+  glm-4.5-air  — budget/overflow (5 concurrent)
+  glm-5-turbo  — reserved for Ocythoe only, NOT used by harness agents
 """
 from __future__ import annotations
 
@@ -17,67 +23,39 @@ logger = logging.getLogger(__name__)
 
 
 # ─── z-ai concurrency limits (simultaneous requests) ────────────────
-# From https://docs.z.ai/devpack/overview
-# Coding plan models: GLM-5.1, GLM-5-Turbo, GLM-4.7, GLM-4.5-Air
-# Other models listed for fallback compatibility
+# Coding Plan Pro subscription — single provider
 Z_AI_CONCURRENCY: dict[str, int] = {
-    # Coding plan models
-    "glm-5.1": 1,
-    "glm-5-turbo": 1,
+    # Coding plan models — primary pool
+    "glm-5.1": 10,
     "glm-4.7": 2,
     "glm-4.5-air": 5,
-    # Other z-ai models (may not be on coding plan)
+    # glm-5-turbo: reserved for Ocythoe (not in harness config)
+    "glm-5-turbo": 2,
+    # Other z-ai models (vision, legacy — lower priority)
     "glm-5": 2,
-    "glm-4.5-airx": 5,
-    "glm-4.7-flash": 1,
     "glm-4.7-flashx": 3,
-    "glm-4.6": 3,
-    "glm-4.6v-flashx": 3,
-    "glm-4.5": 10,
+    "glm-4.7-flash": 3,
+    "glm-4.7v": 10,       # Vision — free, generous
     "glm-4.6v": 10,
-    "glm-4.7v": 10,
-    "glm-5v-turbo": 1,
+    "glm-4.6v-flashx": 3,
+    "glm-4.6v-flash": 3,
+    "glm-5v-turbo": 2,
+    "glm-4.6": 3,
+    "glm-4.5": 5,
+    "glm-4.5-airx": 5,
+    "glm-4.5-flash": 5,
+    "glm-4.5v": 5,
     "glm-ocr": 2,
     "glm-4-plus": 20,
-    "glm-4.5v": 10,
-    "glm-4.6v-flash": 1,
-    "glm-4.5-flash": 2,
     "glm-4-32b-0414-128k": 15,
 }
 
-
-# ─── opencode-go rate limits (requests per time window) ─────────────
-# Safety margin: only use 85% of the limit to avoid hitting the hard cap
-_SAFETY = 0.85
-
-# 5-hour window limits (tightest constraint = primary limit)
-OPENCODE_GO_RATE_LIMITS: dict[str, int] = {
-    "glm-5.1": int(880 * _SAFETY),      # 748
-    "glm-5": int(1150 * _SAFETY),        # 977
-    "kimi-k2.5": int(1850 * _SAFETY),    # 1572
-    "kimi-k2.6": int(1150 * _SAFETY),    # 977
-    "mimo-v2-pro": int(1290 * _SAFETY),  # 1096
-    "mimo-v2-omni": int(2150 * _SAFETY), # 1827
-    "mimo-v2.5-pro": int(1290 * _SAFETY),
-    "mimo-v2.5": int(2150 * _SAFETY),
-    "minimax-m2.7": int(3400 * _SAFETY), # 2890
-    "minimax-m2.5": int(6300 * _SAFETY),
-    "qwen3.6-plus": int(3300 * _SAFETY), # 2805
-    "qwen3.5-plus": int(10200 * _SAFETY),
-    "deepseek-v4-pro": int(3450 * _SAFETY),
-    "deepseek-v4-flash": int(31650 * _SAFETY),
-}
-
-_FIVE_HOURS = 5 * 60 * 60  # seconds
-
 DEFAULT_CONCURRENCY = 2
-DEFAULT_RATE_LIMIT = 500  # conservative default for unknown opencode-go models
 
 
 def normalize_model_name(model: str) -> str:
     """Strip provider prefix and lowercase.
     "z-ai/glm-5.1" → "glm-5.1"
-    "opencode-go/kimi-k2.5" → "kimi-k2.5"
     """
     if "/" in model:
         return model.split("/", 1)[1].lower()
@@ -101,44 +79,8 @@ class Waiter:
     started_at: float | None = None
 
 
-class SlidingWindowCounter:
-    """Tracks request count in a sliding time window."""
-
-    def __init__(self, window_seconds: float) -> None:
-        self._window = window_seconds
-        self._timestamps: list[float] = []
-
-    def record(self) -> None:
-        """Record a request at the current time."""
-        now = time.time()
-        self._timestamps.append(now)
-        self._purge(now)
-
-    def count(self) -> int:
-        """Get count of requests in the current window."""
-        self._purge(time.time())
-        return len(self._timestamps)
-
-    def remaining(self, limit: int) -> int:
-        """How many more requests can be made within the limit."""
-        return max(0, limit - self.count())
-
-    def earliest_expiry(self) -> float | None:
-        """When the oldest request in the window expires (for sleep calculation)."""
-        now = time.time()
-        self._purge(now)
-        if not self._timestamps:
-            return None
-        return self._timestamps[0] + self._window
-
-    def _purge(self, now: float) -> None:
-        """Remove timestamps outside the window."""
-        cutoff = now - self._window
-        self._timestamps = [t for t in self._timestamps if t > cutoff]
-
-
 class ConcurrencyLimiter:
-    """Dual-mode rate limiter: semaphore for z-ai, sliding window for opencode-go.
+    """Per-model concurrency limiter using asyncio.Semaphore.
 
     Usage:
         limiter = ConcurrencyLimiter()
@@ -147,15 +89,8 @@ class ConcurrencyLimiter:
     """
 
     def __init__(self) -> None:
-        # z-ai: concurrency semaphores
         self._semaphores: dict[str, asyncio.Semaphore] = {}
         self._limits: dict[str, int] = {}
-
-        # opencode-go: sliding window counters
-        self._rate_counters: dict[str, SlidingWindowCounter] = {}
-        self._rate_limits: dict[str, int] = {}
-
-        # Tracking
         self._active: dict[str, list[Waiter]] = {}
         self._queue: dict[str, list[Waiter]] = {}
 
@@ -169,29 +104,11 @@ class ConcurrencyLimiter:
             self._queue.setdefault(normalized, [])
         return self._semaphores[normalized]
 
-    def _get_rate_counter(self, model: str) -> tuple[SlidingWindowCounter, int]:
-        normalized = normalize_model_name(model)
-        if normalized not in self._rate_counters:
-            limit = OPENCODE_GO_RATE_LIMITS.get(normalized, DEFAULT_RATE_LIMIT)
-            self._rate_counters[normalized] = SlidingWindowCounter(_FIVE_HOURS)
-            self._rate_limits[normalized] = limit
-        return self._rate_counters[normalized], self._rate_limits[normalized]
-
     async def acquire(self, model: str, agent_name: str = "", team: str | None = None) -> None:
         """Acquire a slot for the given model. Queues if at limit."""
-        provider = get_provider(model)
         normalized = normalize_model_name(model)
         waiter = Waiter(agent_name=agent_name, model=model, team=team)
-
-        if provider == "z-ai":
-            await self._acquire_zai(model, waiter)
-        else:
-            await self._acquire_rate_limited(model, waiter)
-
-    async def _acquire_zai(self, model: str, waiter: Waiter) -> None:
-        """Acquire a z-ai concurrency slot."""
         sem = self._get_semaphore(model)
-        normalized = normalize_model_name(model)
 
         if sem._value <= 0:  # type: ignore[attr-defined]
             self._queue.setdefault(normalized, []).append(waiter)
@@ -218,40 +135,8 @@ class ConcurrencyLimiter:
                 waiter.agent_name, normalized, wait_time,
             )
 
-    async def _acquire_rate_limited(self, model: str, waiter: Waiter) -> None:
-        """Acquire an opencode-go rate-limited slot. Wait if window is exhausted."""
-        counter, limit = self._get_rate_counter(model)
-        normalized = normalize_model_name(model)
-
-        # Record and check
-        while counter.remaining(limit) <= 0:
-            # Need to wait for the window to slide
-            expiry = counter.earliest_expiry()
-            if expiry:
-                wait_seconds = max(1.0, expiry - time.time() + 1.0)
-                logger.warning(
-                    "⏳ %s waiting %.0fs for %s rate limit reset (used %d/%d in 5hr window)",
-                    waiter.agent_name or "agent", wait_seconds, normalized,
-                    counter.count(), limit,
-                )
-                await asyncio.sleep(min(wait_seconds, 60))  # check every 60s max
-            else:
-                break
-
-        counter.record()
-        waiter.started_at = time.time()
-        self._active.setdefault(normalized, []).append(waiter)
-
-        remaining = counter.remaining(limit)
-        if remaining < limit * 0.2:
-            logger.warning(
-                "⚠️ %s started on %s — only %d/%d requests remaining in 5hr window",
-                waiter.agent_name, normalized, remaining, limit,
-            )
-
     def release(self, model: str, agent_name: str = "") -> None:
         """Release a slot."""
-        provider = get_provider(model)
         normalized = normalize_model_name(model)
 
         # Remove from active
@@ -261,23 +146,20 @@ class ConcurrencyLimiter:
                 if w.agent_name != agent_name
             ]
 
-        # Release semaphore for z-ai
-        if provider == "z-ai":
-            sem = self._semaphores.get(normalized)
-            if sem:
-                sem.release()
-                remaining = len(self._queue.get(normalized, []))
-                if remaining > 0:
-                    logger.info(
-                        "✅ %s released %s — %d still queued",
-                        agent_name, normalized, remaining,
-                    )
+        # Release semaphore
+        sem = self._semaphores.get(normalized)
+        if sem:
+            sem.release()
+            remaining = len(self._queue.get(normalized, []))
+            if remaining > 0:
+                logger.info(
+                    "✅ %s released %s — %d still queued",
+                    agent_name, normalized, remaining,
+                )
 
     def get_status(self) -> dict[str, Any]:
         """Return current rate limit status for all tracked models."""
         status = {}
-
-        # z-ai models
         for normalized, limit in self._limits.items():
             active = self._active.get(normalized, [])
             queued = self._queue.get(normalized, [])
@@ -293,25 +175,6 @@ class ConcurrencyLimiter:
                     for w in active
                 ],
             }
-
-        # opencode-go models
-        for normalized, limit in self._rate_limits.items():
-            counter = self._rate_counters[normalized]
-            active = self._active.get(normalized, [])
-            status[f"opencode-go/{normalized}"] = {
-                "provider": "opencode-go",
-                "type": "rate_limit",
-                "window": "5h",
-                "limit": limit,
-                "used": counter.count(),
-                "remaining": counter.remaining(limit),
-                "active": len(active),
-                "active_agents": [
-                    {"name": w.agent_name, "team": w.team}
-                    for w in active
-                ],
-            }
-
         return status
 
     class _SlotContext:
@@ -332,3 +195,263 @@ class ConcurrencyLimiter:
     def slot(self, model: str, agent_name: str = "", team: str | None = None) -> _SlotContext:
         """Context manager: acquire a slot, auto-release on exit."""
         return self._SlotContext(self, model, agent_name, team)
+
+    # ─── Slot availability queries ──────────────────────────────────
+
+    def available_slots(self, model: str) -> int:
+        """Return the number of currently available slots for a model."""
+        normalized = normalize_model_name(model)
+        sem = self._semaphores.get(normalized)
+        if sem:
+            return sem._value  # type: ignore[attr-defined]
+        # Not yet tracked — return the configured limit
+        return Z_AI_CONCURRENCY.get(normalized, DEFAULT_CONCURRENCY)
+
+    def is_available(self, model: str) -> bool:
+        """Check if at least one slot is available for the given model."""
+        return self.available_slots(model) > 0
+
+
+# ─── Model tier ranking (for degradation cascade) ─────────────────────
+# Higher tier number = stronger model. When rationing kicks in, the
+# allocator tries the next tier down until it finds a model with free slots.
+MODEL_TIERS: dict[str, int] = {
+    # Primary coding plan models
+    "glm-5.1": 10,
+    "glm-4.7": 6,
+    "glm-4.5-air": 2,
+    # Other z-ai models
+    "glm-5": 9,
+    "glm-5-turbo": 8,
+    "glm-5v-turbo": 8,
+    "glm-4.7v": 6,
+    "glm-4.7-flashx": 5,
+    "glm-4.7-flash": 4,
+    "glm-4.6": 3,
+    "glm-4.6v": 3,
+    "glm-4.6v-flashx": 3,
+    "glm-4.5-airx": 2,
+    "glm-4.6v-flash": 2,
+    "glm-4.5-flash": 1,
+    "glm-4.5v": 1,
+    "glm-4-32b-0414-128k": 1,
+    "glm-ocr": 1,
+}
+
+# Degradation cascade for z-ai: ordered strongest to weakest
+_ZAI_CASCADE: list[str] = [
+    "glm-5.1", "glm-4.7", "glm-4.5-air",
+]
+
+
+@dataclass
+class AllocationResult:
+    """Result of a slot allocation attempt."""
+    model: str                  # The model that was actually allocated
+    original_model: str         # The model that was originally requested
+    degraded: bool              # True if a weaker model was substituted
+    queued: bool                # True if had to wait (no alternative had slots)
+    wait_seconds: float = 0.0
+
+
+class SlotAllocator:
+    """Rationing system: allocates LLM slots with automatic degradation.
+
+    Before a subagent can run, it must call ``allocate()`` to get a slot.
+    If the preferred model has no available slots, the allocator walks down
+    the tier list, and only queues as a last resort.
+
+    Usage::
+
+        allocator = SlotAllocator(limiter)
+        result = await allocator.allocate(
+            preferred="z-ai/glm-5.1",
+            fallback_models=["z-ai/glm-4.7", "z-ai/glm-4.5-air"],
+            agent_name="engineering_lead",
+            team="engineering",
+        )
+        # result.model might be "z-ai/glm-4.7" if glm-5.1 was full
+        # ... run agent with result.model ...
+        allocator.release(result.model, "engineering_lead")
+    """
+
+    def __init__(
+        self,
+        limiter: ConcurrencyLimiter,
+        max_queue_wait: float = 120.0,
+        queue_poll_interval: float = 2.0,
+    ) -> None:
+        self._limiter = limiter
+        self._max_queue_wait = max_queue_wait
+        self._queue_poll_interval = queue_poll_interval
+        self._allocations: dict[str, list[dict[str, Any]]] = {}
+
+    async def allocate(
+        self,
+        preferred: str,
+        fallback_models: list[str] | None = None,
+        agent_name: str = "",
+        team: str | None = None,
+    ) -> AllocationResult:
+        """Allocate a slot, degrading to weaker models if necessary.
+
+        Strategy:
+        1. Try the preferred model — if a slot is free, take it immediately.
+        2. Walk the degradation cascade: preferred → config fallback_models →
+           same-provider weaker models.
+        3. Take the first model with an available slot.
+        4. If nothing is free, queue on the preferred model (respects max wait).
+
+        Args:
+            preferred: The model the agent ideally wants to use.
+            fallback_models: Agent-specific fallback list from config.
+            agent_name: Name of the requesting agent (for logging/tracking).
+            team: Team name (for logging/tracking).
+
+        Returns:
+            AllocationResult with the allocated model and degradation info.
+        """
+        preferred_norm = normalize_model_name(preferred)
+        preferred_tier = MODEL_TIERS.get(preferred_norm, 5)
+
+        # Build degradation cascade
+        cascade = self._build_cascade(
+            preferred=preferred,
+            preferred_norm=preferred_norm,
+            preferred_tier=preferred_tier,
+            fallback_models=fallback_models or [],
+        )
+
+        # Step 1 & 2: Try each model in the cascade for an available slot
+        for candidate in cascade:
+            if self._limiter.is_available(candidate):
+                await self._limiter.acquire(candidate, agent_name, team)
+                self._track_allocation(candidate, agent_name, team)
+                degraded = normalize_model_name(candidate) != preferred_norm
+                if degraded:
+                    logger.info(
+                        "📉 %s degraded from %s → %s (slots available)",
+                        agent_name, preferred, candidate,
+                    )
+                return AllocationResult(
+                    model=candidate,
+                    original_model=preferred,
+                    degraded=degraded,
+                    queued=False,
+                )
+
+        # Step 3: All alternatives full — queue on preferred model
+        logger.warning(
+            "🚫 %s: all models in cascade full, queuing on %s (max wait %.0fs)",
+            agent_name, preferred, self._max_queue_wait,
+        )
+        start = time.time()
+        await asyncio.wait_for(
+            self._limiter.acquire(preferred, agent_name, team),
+            timeout=self._max_queue_wait,
+        )
+        wait_seconds = time.time() - start
+        self._track_allocation(preferred, agent_name, team)
+
+        logger.info(
+            "✅ %s acquired %s after queuing %.1fs",
+            agent_name, preferred, wait_seconds,
+        )
+        return AllocationResult(
+            model=preferred,
+            original_model=preferred,
+            degraded=False,
+            queued=True,
+            wait_seconds=wait_seconds,
+        )
+
+    def release(self, model: str, agent_name: str = "") -> None:
+        """Release an allocated slot."""
+        self._limiter.release(model, agent_name)
+        self._remove_allocation(model, agent_name)
+
+    def _build_cascade(
+        self,
+        preferred: str,
+        preferred_norm: str,
+        preferred_tier: int,
+        fallback_models: list[str],
+    ) -> list[str]:
+        """Build ordered list of models to try, strongest first."""
+        seen: set[str] = {preferred_norm}
+        cascade: list[str] = [preferred]
+
+        # 1. Config fallback models (in order — these are from multi_team.yaml)
+        for fb in fallback_models:
+            fb_norm = normalize_model_name(fb)
+            if fb_norm not in seen:
+                seen.add(fb_norm)
+                cascade.append(fb)
+
+        # 2. Same-provider models weaker than preferred, sorted by tier desc
+        weaker_same = [
+            (MODEL_TIERS.get(m, 0), m) for m in _ZAI_CASCADE
+            if m not in seen and MODEL_TIERS.get(m, 0) < preferred_tier
+        ]
+        for _, model_name in sorted(weaker_same, reverse=True):
+            if model_name not in seen:
+                seen.add(model_name)
+                cascade.append(f"z-ai/{model_name}")
+
+        return cascade
+
+    def _track_allocation(self, model: str, agent_name: str, team: str | None) -> None:
+        """Track current allocations for the /slots command."""
+        normalized = normalize_model_name(model)
+        entry = {"agent": agent_name, "team": team, "model": model, "allocated_at": time.time()}
+        self._allocations.setdefault(normalized, []).append(entry)
+
+    def _remove_allocation(self, model: str, agent_name: str) -> None:
+        """Remove a tracked allocation."""
+        normalized = normalize_model_name(model)
+        if normalized in self._allocations:
+            self._allocations[normalized] = [
+                a for a in self._allocations[normalized] if a["agent"] != agent_name
+            ]
+
+    def get_status(self) -> dict[str, Any]:
+        """Return allocation status for dashboard / CLI display."""
+        limiter_status = self._limiter.get_status()
+        return {
+            "limiter": limiter_status,
+            "allocations": self._allocations,
+        }
+
+    def format_slots(self) -> str:
+        """Format a human-readable slot allocation table."""
+        from rich.table import Table
+        from rich.text import Text
+
+        table = Table(title="LLM Slot Allocation", show_lines=True)
+        table.add_column("Model", style="bold")
+        table.add_column("Provider")
+        table.add_column("Type")
+        table.add_column("Slots", justify="right")
+        table.add_column("Active", justify="right", style="green")
+        table.add_column("Allocated To")
+
+        limiter_status = self._limiter.get_status()
+        for model_key, info in sorted(limiter_status.items()):
+            provider = info["provider"]
+            slots_str = f"{info['available']}/{info['limit']}"
+
+            active = info["active"]
+            active_agents = ", ".join(
+                a["name"] for a in info["active_agents"]
+            ) or "—"
+
+            table.add_row(
+                model_key,
+                provider,
+                info["type"],
+                slots_str,
+                str(active),
+                active_agents,
+            )
+
+        return str(table)

@@ -181,6 +181,7 @@ class TaskQueue:
                     "task_completed",
                     data={
                         "task_id": task.task_id,
+                        "result": result,
                         "result_length": len(result),
                         "duration": task.completed_at - task.started_at,
                     },

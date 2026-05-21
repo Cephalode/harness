@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shlex
 from typing import Any
@@ -13,7 +14,7 @@ from .domain import DomainEnforcer
 from .expertise import ExpertiseManager
 from .events import EventBus, HarnessEvent
 from .models import CostTracker, TokenUsage, parse_usage_from_pi_output
-from .rate_limiter import ConcurrencyLimiter
+from .rate_limiter import ConcurrencyLimiter, SlotAllocator, normalize_model_name
 from .session import Session
 from .skills import SkillLoader
 
@@ -32,6 +33,7 @@ class Agent:
         session: Session | None = None,
         event_bus: EventBus | None = None,
         rate_limiter: ConcurrencyLimiter | None = None,
+        slot_allocator: SlotAllocator | None = None,
     ) -> None:
         self.config = config
         self.team_name = team_name
@@ -40,6 +42,7 @@ class Agent:
         self.session = session
         self.event_bus = event_bus
         self.rate_limiter = rate_limiter
+        self.slot_allocator = slot_allocator
 
         self._worker_names: list[str] = []
 
@@ -86,22 +89,36 @@ class Agent:
         # Inject domain rules
         parts.append(self.domain_enforcer.format_domain_rules())
 
-        # Inject status reporting instruction
-        parts.append(
-            "## Status Reporting\n\n"
-            "You are running inside a multi-agent orchestration harness with a live dashboard. "
-            "When you begin working on a NEW subtask or phase of your work, output a status line "
-            "in this exact format at the START of your response (before any other output):\n\n"
-            "```status\n"
-            "message: <brief description of what you're about to do>\n"
-            "```\n\n"
-            "For example:\n"
-            "- ```status\nmessage: Reading the main.py file to understand the codebase\n```\n"
-            "- ```status\nmessage: Writing unit tests for the auth module\n```\n"
-            "- ```status\nmessage: Analyzing the error log to find root cause\n```\n\n"
-            "This status is displayed on a live dashboard so your operator can see what you're doing. "
-            "Always emit a status update when your focus shifts to a new activity."
-        )
+        # Inject vision-specific instructions for image analysis agents
+        if self.config.vision:
+            parts.append(
+                "## CRITICAL: Vision Mode\n\n"
+                "You are a VISION agent. Images are attached DIRECTLY to your input as visual content.\n"
+                "You must ANALYZE the images visually — do NOT use the `read` tool or any other tool to open them.\n"
+                "The images are already rendered in your conversation. Just look at them and describe what you see.\n"
+                "NEVER attempt to read image files with tools. NEVER use bash to inspect images.\n"
+                "Simply respond with your visual analysis as text."
+            )
+
+        # Inject status reporting instruction (skip for vision agents — they
+        # do single-pass analysis and the status instruction causes weaker
+        # vision models to stop after emitting just the status block)
+        if not self.config.vision:
+            parts.append(
+                "## Status Reporting\n\n"
+                "You are running inside a multi-agent orchestration harness with a live dashboard. "
+                "When you begin working on a NEW subtask or phase of your work, output a status line "
+                "in this exact format at the START of your response (before any other output):\n\n"
+                "```status\n"
+                "message: <brief description of what you're about to do>\n"
+                "```\n\n"
+                "For example:\n"
+                "- ```status\nmessage: Reading the main.py file to understand the codebase\n```\n"
+                "- ```status\nmessage: Writing unit tests for the auth module\n```\n"
+                "- ```status\nmessage: Analyzing the error log to find root cause\n```\n\n"
+                "This status is displayed on a live dashboard so your operator can see what you're doing. "
+                "Always emit a status update when your focus shifts to a new activity."
+            )
 
         # Inject delegation instructions if workers are configured
         if self._worker_names:
@@ -116,8 +133,16 @@ class Agent:
                 "context: <additional context the agent needs>\n"
                 "```\n\n"
                 f"Your available workers:\n{workers_list}\n\n"
-                "You can include multiple delegation blocks for parallel execution.\n"
-                "ALWAYS use this format to delegate. Do not describe delegation in prose — use the code blocks.\n"
+                "### Slot Rationing\n\n"
+                "**Each worker you delegate to consumes an LLM slot.** Slots are limited — "
+                "strong models (glm-5.1, kimi-k2.5) often have only 1 concurrent slot. "
+                "If you delegate too many workers in parallel, some will be degraded to weaker models automatically.\n\n"
+                "**Guidelines:**\n"
+                "- Prefer fewer, well-scoped delegations over many parallel ones\n"
+                "- For critical tasks, delegate sequentially so the best model is available\n"
+                "- For independent low-priority tasks, parallel delegation is fine\n"
+                "- You can include multiple delegation blocks for parallel execution\n\n"
+                "ALWAYS use the delegate code block format. Do not describe delegation in prose.\n"
             )
 
         return "\n\n---\n\n".join(parts)
@@ -148,61 +173,143 @@ class Agent:
         message: str,
         context: str = "",
         timeout: int = 300,
+        image_paths: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Run this agent with the given message, return parsed output."""
+        """Run this agent with the given message, return parsed output.
+
+        If a SlotAllocator is configured, the agent must acquire a slot
+        before running. If the preferred model is full, the allocator will
+        degrade to a weaker model with available capacity.
+
+        Args:
+            message: The task/message for the agent.
+            context: Additional context from delegation.
+            timeout: Max seconds to wait for PI response.
+            image_paths: Local file paths to images. Only passed to PI
+                when this agent has vision=true.
+        """
         system_prompt = self._build_system_prompt()
         prompt = self._build_prompt(message, context)
 
-        models_to_try = [self.model] + self.config.fallback_models
+        # ── Slot allocation (rationing) ──────────────────────────────
+        # If we have a slot allocator, use it to get the best available
+        # model *before* we even try to run. This is the rationing gate.
+        allocated_model: str | None = None
+        allocation_result = None
+
+        if self.slot_allocator:
+            allocation_result = await self.slot_allocator.allocate(
+                preferred=self.model,
+                fallback_models=self.config.fallback_models,
+                agent_name=self.name,
+                team=self.team_name,
+            )
+            allocated_model = allocation_result.model
+
+            # Emit degradation event so the dashboard can show it
+            if allocation_result.degraded and self.event_bus:
+                self.event_bus.emit(HarnessEvent(
+                    "model_degradation",
+                    agent=self.name,
+                    team=self.team_name,
+                    data={
+                        "original_model": allocation_result.original_model,
+                        "allocated_model": allocated_model,
+                        "reason": "no_slots_available",
+                    },
+                ))
+            elif allocation_result.queued and self.event_bus:
+                self.event_bus.emit(HarnessEvent(
+                    "model_queued",
+                    agent=self.name,
+                    team=self.team_name,
+                    data={
+                        "model": allocated_model,
+                        "wait_seconds": allocation_result.wait_seconds,
+                    },
+                ))
+
+            # Use the allocated model as the primary; keep fallback_models
+            # for error-based fallback (API failure, timeout, etc.)
+            models_to_try = [allocated_model]
+            # Add config fallbacks that aren't the allocated model
+            for fb in self.config.fallback_models:
+                if normalize_model_name(fb) != normalize_model_name(allocated_model):
+                    models_to_try.append(fb)
+        else:
+            # No allocator — original behavior: try preferred then fallbacks
+            models_to_try = [self.model] + self.config.fallback_models
 
         if self.event_bus:
             self.event_bus.emit(HarnessEvent("agent_start", agent=self.name, team=self.team_name, data={"model": models_to_try[0], "message_length": len(message)}))
 
-        for i, model in enumerate(models_to_try):
-            # Build the pi CLI command (prompt piped via stdin, not -p flag)
-            cmd = [
-                "pi",
-                "--system-prompt", system_prompt,
-                "--mode", "json",
-            ]
+        result = None
+        try:
+            for i, model in enumerate(models_to_try):
+                # Build the pi CLI command (prompt piped via stdin, not -p flag)
+                cmd = [
+                    "pi",
+                    "--system-prompt", system_prompt,
+                    "--mode", "json",
+                ]
 
-            # Only add --model if specified (otherwise PI uses its default provider/model)
-            if model:
-                cmd.extend(["--model", model])
+                # Only add --model if specified (otherwise PI uses its default provider/model)
+                if model:
+                    cmd.extend(["--model", model])
 
-            # Restrict tools based on domain - workers that shouldn't write get read-only
-            if self.config.domain.update and "." not in self.config.domain.update:
-                cmd.extend(["--tools", "read,bash"])
+                # Restrict tools based on domain - workers that shouldn't write get read-only
+                # Vision agents: disable ALL tools. They analyze attached images directly
+                # and should never try to read/write files or run bash commands.
+                # (--no-tools also prevents the coding agent from treating images as files to read)
+                if self.config.vision:
+                    cmd.extend(["--no-tools", "--no-skills", "--no-extensions"])
+                elif self.config.domain.update and "." not in self.config.domain.update:
+                    cmd.extend(["--tools", "read,bash"])
 
-            try:
-                if self.rate_limiter:
-                    async with self.rate_limiter.slot(model, agent_name=self.name, team=self.team_name):
+                # ── Vision: attach image files for vision-capable agents ──
+                if image_paths and self.config.vision:
+                    for img_path in image_paths:
+                        if os.path.isfile(img_path):
+                            cmd.extend([f"@{img_path}"])
+
+                try:
+                    # If we already have a slot from the allocator, skip the
+                    # rate_limiter.slot() context (the allocator handles it).
+                    # Otherwise, fall back to the old rate_limiter path.
+                    if self.slot_allocator and i == 0:
                         result = await self._execute_pi(cmd, prompt, timeout)
-                else:
-                    result = await self._execute_pi(cmd, prompt, timeout)
-            except Exception as exc:
-                if self.event_bus:
-                    self.event_bus.emit(HarnessEvent("agent_error", agent=self.name, team=self.team_name, data={"error": str(exc), "model": model}))
-                result = {"error": str(exc), "result": f"Agent {self.name} crashed: {exc}", "usage": {}}
+                    elif self.rate_limiter:
+                        async with self.rate_limiter.slot(model, agent_name=self.name, team=self.team_name):
+                            result = await self._execute_pi(cmd, prompt, timeout)
+                    else:
+                        result = await self._execute_pi(cmd, prompt, timeout)
+                except Exception as exc:
+                    if self.event_bus:
+                        self.event_bus.emit(HarnessEvent("agent_error", agent=self.name, team=self.team_name, data={"error": str(exc), "model": model}))
+                    result = {"error": str(exc), "result": f"Agent {self.name} crashed: {exc}", "usage": {}}
 
-            # Success = no error and non-empty result
-            if not result.get("error") and result.get("result", "").strip():
-                if self.event_bus:
-                    self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"model": result.get("model", model), "status": "success", "result_length": len(result.get("result", ""))}))
-                return result
+                # Success = no error and non-empty result
+                if not result.get("error") and result.get("result", "").strip():
+                    if self.event_bus:
+                        self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"model": result.get("model", model), "status": "success", "result_length": len(result.get("result", ""))}))
+                    return result
 
-            # Failure but no more models to try
-            if i >= len(models_to_try) - 1:
-                if self.event_bus:
-                    self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "error", "reason": "all_models_failed"}))
-                return result
+                # Failure but no more models to try
+                if i >= len(models_to_try) - 1:
+                    if self.event_bus:
+                        self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "error", "reason": "all_models_failed"}))
+                    return result
 
-            # Try next model
-            continue
+                # Try next model
+                continue
 
-        if self.event_bus:
-            self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "error", "reason": "all_models_failed"}))
-        return {"error": "all models failed", "result": "All model attempts failed", "usage": {}}
+            if self.event_bus:
+                self.event_bus.emit(HarnessEvent("agent_end", agent=self.name, team=self.team_name, data={"status": "error", "reason": "all_models_failed"}))
+            return {"error": "all models failed", "result": "All model attempts failed", "usage": {}}
+        finally:
+            # Always release the allocated slot when done (success or failure)
+            if self.slot_allocator and allocated_model:
+                self.slot_allocator.release(allocated_model, self.name)
 
     async def _execute_pi(
         self, cmd: list[str], prompt_text: str, timeout: int,

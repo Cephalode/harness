@@ -91,6 +91,7 @@ class HarnessCLI:
             ("/toggle workers", "Show/hide detailed worker activity"),
             ("/cost", "Show cost breakdown"),
             ("/teams", "Show team structure"),
+            ("/slots", "Show LLM slot allocation & availability"),
             ("/expertise [agent]", "Show an agent's expertise/mental model"),
             ("/compact", "Compress conversation history"),
             ("/clear", "Clear conversation"),
@@ -134,6 +135,13 @@ class HarnessCLI:
         elif cmd == "/teams":
             if self.orchestrator:
                 console.print(self.orchestrator.get_team_info())
+            else:
+                console.print("[yellow]No session active[/yellow]")
+            return True
+
+        elif cmd == "/slots":
+            if self.orchestrator and self.orchestrator.slot_allocator:
+                console.print(self.orchestrator.slot_allocator.format_slots())
             else:
                 console.print("[yellow]No session active[/yellow]")
             return True

@@ -20,21 +20,18 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     # Google
     "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
     "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
-    # Z.ai / GLM
-    "glm-5.1": {"input": 0.0, "output": 0.0},  # Free tier
+    # Z.ai / GLM — Coding Plan (all $0 on subscription)
+    "glm-5.1": {"input": 0.0, "output": 0.0},
     "glm-5": {"input": 0.0, "output": 0.0},
     "glm-5-turbo": {"input": 0.0, "output": 0.0},
+    "glm-4.7": {"input": 0.0, "output": 0.0},
     "glm-4.7-flashx": {"input": 0.0, "output": 0.0},
     "glm-4.7-flash": {"input": 0.0, "output": 0.0},
-    "glm-4.5-flash": {"input": 0.0, "output": 0.0},  # FREE
-    "glm-4.6v": {"input": 0.0, "output": 0.0},  # Vision
-    "glm-4.6v-flash": {"input": 0.0, "output": 0.0},  # FREE vision
-    "glm-4.7v": {"input": 0.0, "output": 0.0},  # Vision
-    # OpenCode-go models
-    "kimi-k2.5": {"input": 0.0, "output": 0.0},
-    "minimax-m2.7": {"input": 0.0, "output": 0.0},
-    "qwen3.6-plus": {"input": 0.0, "output": 0.0},
-    "mimo-v2-pro": {"input": 0.0, "output": 0.0},
+    "glm-4.5-air": {"input": 0.0, "output": 0.0},
+    "glm-4.5-flash": {"input": 0.0, "output": 0.0},
+    "glm-4.6v": {"input": 0.0, "output": 0.0},
+    "glm-4.6v-flash": {"input": 0.0, "output": 0.0},
+    "glm-4.7v": {"input": 0.0, "output": 0.0},
     # Ollama (local, free)
     "qwen3.5:latest": {"input": 0.0, "output": 0.0},
     # Default

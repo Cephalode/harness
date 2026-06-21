@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { useDashboardStore } from '../store'
+import { useDashboardStore, type WorkerStatusEntry } from '../store'
 
 export function useWebSocket(url: string = `ws://${window.location.host}/ws`) {
   const wsRef = useRef<WebSocket | null>(null)
@@ -7,6 +7,8 @@ export function useWebSocket(url: string = `ws://${window.location.host}/ws`) {
   const setConnected = useDashboardStore((s) => s.setConnected)
   const setTeamData = useDashboardStore((s) => s.setTeamData)
   const addEvent = useDashboardStore((s) => s.addEvent)
+  const updateAgentStatus = useDashboardStore((s) => s.updateAgentStatus)
+  const setWorkerStatuses = useDashboardStore((s) => s.setWorkerStatuses)
 
   const connect = useCallback(() => {
     try {
@@ -25,6 +27,16 @@ export function useWebSocket(url: string = `ws://${window.location.host}/ws`) {
           if (data.type === 'init') {
             // Initial team tree
             setTeamData(data.data)
+            // Restore agent statuses if provided (from server-side tracker)
+            if (data.agent_statuses && typeof data.agent_statuses === 'object') {
+              Object.entries(data.agent_statuses).forEach(([agent, status]) => {
+                updateAgentStatus(agent, status as string)
+              })
+            }
+            // Restore worker statuses from init
+            if (data.worker_statuses && typeof data.worker_statuses === 'object') {
+              setWorkerStatuses(data.worker_statuses as Record<string, WorkerStatusEntry>)
+            }
           } else {
             // HarnessEvent
             addEvent(data)
@@ -48,7 +60,7 @@ export function useWebSocket(url: string = `ws://${window.location.host}/ws`) {
       console.error('[WS] Connection failed:', err)
       reconnectTimer.current = setTimeout(connect, 2000)
     }
-  }, [url, setConnected, setTeamData, addEvent])
+  }, [url, setConnected, setTeamData, addEvent, updateAgentStatus, setWorkerStatuses])
 
   useEffect(() => {
     connect()

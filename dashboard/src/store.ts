@@ -16,6 +16,14 @@ export interface AgentNode {
   status: string
 }
 
+export interface WorkerStatusEntry {
+  agent: string
+  message: string
+  timestamp: number
+  team: string | null
+  task: string | null
+}
+
 export interface TeamNode {
   name: string
   color: string
@@ -33,6 +41,34 @@ export interface CostData {
   total_usage: { input_tokens: number; output_tokens: number }
   by_agent: Record<string, number>
   by_team: Record<string, number>
+}
+
+export interface PersistedAgentState {
+  name: string
+  status: string
+  model: string
+  team: string | null
+  last_message: string
+  last_updated: number
+}
+
+export interface TaskState {
+  task: string
+  platform: string
+  started_at: number
+  status: string
+}
+
+export interface QueueStatus {
+  queue_length: number
+  is_processing: boolean
+  current_task: {
+    task_id: string
+    message: string
+    status: string
+    started_at: number
+  } | null
+  total_processed: number
 }
 
 export interface SessionData {
@@ -58,16 +94,33 @@ interface DashboardState {
   // Session
   session: SessionData | null
 
-  // Agent status tracking (agent_name -> status)
-  agentStatuses: Record<string, string>
+ // Agent status tracking (agent_name -> status)
+ agentStatuses: Record<string, string>
 
-  // Actions
+  // Worker status tracking (agent_name -> WorkerStatusEntry)
+  workerStatuses: Record<string, WorkerStatusEntry>
+
+  // Persisted agent state from StateStore REST API
+  persistedAgents: Record<string, PersistedAgentState>
+
+  // Current task from StateStore REST API
+  currentTask: TaskState | null
+
+  // Queue status from async task queue
+  queueStatus: QueueStatus | null
+
+ // Actions
   setConnected: (connected: boolean) => void
   setTeamData: (data: TeamData) => void
   addEvent: (event: HarnessEvent) => void
   setCosts: (costs: CostData) => void
   setSession: (session: SessionData) => void
-  updateAgentStatus: (agent: string, status: string) => void
+ updateAgentStatus: (agent: string, status: string) => void
+  setWorkerStatuses: (statuses: Record<string, WorkerStatusEntry>) => void
+  updateWorkerStatus: (agent: string, status: WorkerStatusEntry) => void
+  setPersistedAgents: (agents: Record<string, PersistedAgentState>) => void
+  setCurrentTask: (task: TaskState | null) => void
+  setQueueStatus: (status: QueueStatus) => void
   clearEvents: () => void
 }
 
@@ -81,6 +134,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   costs: null,
   session: null,
   agentStatuses: {},
+ workerStatuses: {},
+  persistedAgents: {},
+  currentTask: null,
+  queueStatus: null,
 
   setConnected: (connected) => set({ connected }),
   setTeamData: (teamData) => set({ teamData }),
@@ -96,12 +153,40 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       else if (event.type === 'agent_end') statuses[event.agent] = 'done'
       else if (event.type === 'agent_error') statuses[event.agent] = 'error'
     }
-    return { events, agentStatuses: statuses }
+    // Derive worker status from event
+    let workerStatuses = state.workerStatuses
+    if (event.type === 'worker_status' && event.agent) {
+      workerStatuses = { ...state.workerStatuses }
+      workerStatuses[event.agent] = {
+        agent: event.agent,
+        message: (event.data.message as string) || 'Working...',
+        timestamp: event.timestamp,
+        team: event.team,
+        task: (event.data.task as string) || null,
+      }
+    }
+    return { events, agentStatuses: statuses, workerStatuses }
   }),
   setCosts: (costs) => set({ costs }),
   setSession: (session) => set({ session }),
-  updateAgentStatus: (agent, status) => set((state) => ({
-    agentStatuses: { ...state.agentStatuses, [agent]: status },
-  })),
+ updateAgentStatus: (agent, status) => set((state) => ({
+   agentStatuses: { ...state.agentStatuses, [agent]: status },
+ })),
+ setWorkerStatuses: (workerStatuses) => set({ workerStatuses }),
+ updateWorkerStatus: (agent, status) => set((state) => ({
+   workerStatuses: { ...state.workerStatuses, [agent]: status },
+ })),
+  setPersistedAgents: (persistedAgents) => set((state) => {
+    // Sync persisted statuses into agentStatuses (but don't override running)
+    const statuses = { ...state.agentStatuses }
+    for (const [name, agent] of Object.entries(persistedAgents)) {
+      if (statuses[name] !== 'running') {
+        statuses[name] = agent.status
+      }
+    }
+    return { persistedAgents, agentStatuses: statuses }
+  }),
+  setCurrentTask: (currentTask) => set({ currentTask }),
+  setQueueStatus: (queueStatus) => set({ queueStatus }),
   clearEvents: () => set({ events: [] }),
 }))

@@ -4,9 +4,21 @@ __pycache__/
 .pytest_cache/
 sessions/
 expertise/
+state/
 *.egg-info/
 dist/
 build/
 .venv/
 dashboard/node_modules/
 dashboard/dist/
+.env
+
+# Test/temp files
+hello.py
+hello.txt
+
+# Compiled binaries
+tui/harness-tui
+
+# Dashboard runtime logs
+.logs/

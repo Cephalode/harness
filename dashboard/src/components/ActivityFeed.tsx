@@ -16,14 +16,18 @@ function eventLabel(type: string): string {
     agent_start: '⚡ Agent Started',
     agent_end: '✓ Agent Finished',
     agent_error: '❌ Agent Error',
+    task_queued: '📥 Task Queued',
+    task_started: '▶️ Task Started',
+    task_completed: '✅ Task Completed',
+    task_failed: '❌ Task Failed',
   }
   return labels[type] || type
 }
 
 function eventColor(type: string): string {
-  if (type.includes('error')) return 'var(--status-error)'
-  if (type.includes('start')) return 'var(--status-running)'
-  if (type.includes('end') || type.includes('done')) return 'var(--status-done)'
+  if (type.includes('error') || type === 'task_failed') return 'var(--status-error)'
+  if (type.includes('start') || type === 'task_started' || type === 'task_queued') return 'var(--status-running)'
+  if (type.includes('end') || type.includes('done') || type === 'task_completed') return 'var(--status-done)'
   return 'var(--text-dim)'
 }
 
@@ -51,20 +55,44 @@ export default function ActivityFeed() {
   return (
     <div ref={scrollRef} className="space-y-2 overflow-y-auto">
       {events.map((event, i) => (
-        <div key={i} className="flex items-start gap-3 px-2 py-1.5 rounded hover:bg-white/3">
-          <span className="text-xs text-gray-600 mt-0.5 flex-shrink-0 w-16">
-            {formatTimestamp(event.timestamp)}
+        <div
+          key={i}
+          className="
+            /* Mobile: vertical card layout */
+            flex flex-col gap-1 px-3 py-2.5 rounded border-b border-white/5
+            bg-white/[0.02]
+            /* Desktop: horizontal layout */
+            md:flex-row md:items-start md:gap-3 md:px-2 md:py-1.5 md:border-b-0
+            md:bg-transparent md:rounded md:hover:bg-white/[0.03]
+          "
+        >
+          {/* Timestamp: badge on mobile, inline on desktop */}
+          <span
+            className="text-xs text-gray-500 md:text-gray-600 md:mt-0.5 md:flex-shrink-0 md:w-16"
+          >
+            <span className="md:hidden inline-block bg-white/5 rounded px-1.5 py-0.5 text-[10px] font-mono">
+              {formatTimestamp(event.timestamp)}
+            </span>
+            <span className="hidden md:inline">
+              {formatTimestamp(event.timestamp)}
+            </span>
           </span>
-          <span className="text-xs font-medium mt-0.5" style={{ color: eventColor(event.type) }}>
-            {eventLabel(event.type)}
-          </span>
-          <span className="text-sm text-gray-400">
-            {event.agent && <span className="text-blue-400">{event.agent}</span>}
-            {event.team && <span className="text-gray-600"> → </span>}
-            {event.team && <span className="text-yellow-400">{event.team}</span>}
-          </span>
+
+          {/* Label + agent/team row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-medium" style={{ color: eventColor(event.type) }}>
+              {eventLabel(event.type)}
+            </span>
+            <span className="text-sm text-gray-400">
+              {event.agent && <span className="text-blue-400">{event.agent}</span>}
+              {event.team && <span className="text-gray-600"> → </span>}
+              {event.team && <span className="text-yellow-400">{event.team}</span>}
+            </span>
+          </div>
+
+          {/* Message preview: full width on mobile, truncated inline on desktop */}
           {event.data?.message != null && (
-            <span className="text-xs text-gray-600 truncate ml-2">
+            <span className="text-xs text-gray-600 md:truncate md:ml-2">
               {String(event.data.message as string).slice(0, 120)}
             </span>
           )}

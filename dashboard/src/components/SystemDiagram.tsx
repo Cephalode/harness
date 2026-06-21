@@ -15,7 +15,6 @@ import '@xyflow/react/dist/style.css'
 import { useDashboardStore } from '../store'
 
 // --- Layout constants ---
-const NODE_WIDTH = 160
 const NODE_HEIGHT = 80
 const LEVEL_GAP = 250 // horizontal gap between hierarchy levels
 const NODE_GAP = 20 // vertical gap between sibling nodes
@@ -227,12 +226,16 @@ export default function SystemDiagram() {
       >
         <Background color="#1a1a2e" gap={20} size={1} />
         <Controls
+          className="!min-h-[44px] [&>button]:!min-h-[44px] [&>button]:!min-w-[44px] [&>button]:!w-[44px] [&>button]:!h-[44px]"
           style={{ background: 'var(--bg-sidebar)', borderColor: 'var(--border)' }}
         />
-        <MiniMap
-          style={{ background: 'var(--bg-sidebar)', borderColor: 'var(--border)' }}
-          nodeColor={() => '#3b82f6'}
-        />
+        {/* MiniMap hidden on mobile, visible on desktop */}
+        <div className="hidden md:block">
+          <MiniMap
+            style={{ background: 'var(--bg-sidebar)', borderColor: 'var(--border)' }}
+            nodeColor={() => '#3b82f6'}
+          />
+        </div>
       </ReactFlow>
     </div>
   )

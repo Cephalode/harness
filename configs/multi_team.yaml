@@ -1,18 +1,17 @@
 # Multi-Team Agentic Coding Harness Configuration
 #
 # Runtime: PI coding agent (pi -p)
-# Models: provider prefix format: "z-ai/glm-5.1", "opencode-go/qwen3.6-plus", etc.
-#          Leave empty to use PI's default provider/model
+# Models: z-ai provider only — Coding Plan subscription
+#   glm-5.1 (flagship), glm-4.7 (workhorse), glm-4.5-air (budget/overflow)
+#   glm-5-turbo reserved for Ocythoe (Hermes) only — NOT used by harness agents
 #
-# Providers:
-#   z-ai        — 13 GLM models (glm-5.1 flagship, glm-4.7-flashx cheap, glm-4.7/4.5-flash FREE)
-#   opencode-go — 9 models (kimi-k2.5, minimax-m2.7, qwen3.6-plus, mimo-v2)
+# Default: glm-5.1 everywhere; degrades to glm-4.7 → glm-4.5-air when concurrent slots fill
 #
-# Default PI config: provider=z-ai, model=glm-5.1
+# Concurrency limits: 10× glm-5.1, 2× glm-4.7, 5× glm-4.5-air
 
 orchestrator:
   name: orchestrator
-  model: "z-ai/glm-5.1"          # only agent using glm-5.1 — single entry point
+  model: "z-ai/glm-5.1"
   system_prompt: agents/orchestrator.md
   expertise:
     - path: expertise/orchestrator.md
@@ -30,10 +29,10 @@ teams:
     color: blue
     lead:
       name: planning_lead
-      model: "opencode-go/kimi-k2.5"
+      model: "z-ai/glm-5.1"
       fallback_models:
-        - "z-ai/glm-5.1"
-        - "z-ai/glm-4.7-flashx"
+        - "z-ai/glm-4.7"
+        - "z-ai/glm-4.5-air"
       system_prompt: agents/planning_lead.md
       expertise:
         - path: expertise/planning_lead.md
@@ -50,9 +49,10 @@ teams:
         update: ["expertise/", "specs/"]
     workers:
       - name: planner
-        model: "z-ai/glm-4.7-flashx"
+        model: "z-ai/glm-5.1"
         fallback_models:
-          - "opencode-go/minimax-m2.7"
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
         system_prompt: agents/planner.md
         skills:
           - skills/active_listener.md
@@ -60,9 +60,21 @@ teams:
         domain:
           read: ["."]
           update: ["expertise/"]
+      - name: spec_writer
+        model: "z-ai/glm-5.1"
+        fallback_models:
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
+        system_prompt: agents/spec_writer.md
+        skills:
+          - skills/active_listener.md
+          - skills/mental_model.md
+        domain:
+          read: ["."]
+          update: ["expertise/", "docs/", "specs/"]
 
   # ── Engineering team with A/B instances ──────────────────────────
-  # Team A (z-ai models) and Team B (opencode-go models) run in parallel
+  # Team A and Team B run in parallel with the same model pool (z-ai only)
   # when instances are expanded by the orchestrator.
   - name: engineering
     color: green
@@ -70,19 +82,21 @@ teams:
       - name: engineering_A
         models:
           engineering_lead: "z-ai/glm-5.1"
-          frontend_dev: "z-ai/glm-4.7-flashx"
-          backend_dev: "z-ai/glm-4.7-flashx"
+          frontend_dev: "z-ai/glm-5.1"
+          backend_dev: "z-ai/glm-5.1"
+          fullstack_engineer_claude: "anthropic/claude-sonnet-4-6"
+          browser_harness_agent: "anthropic/claude-sonnet-4-6"
       - name: engineering_B
         models:
-          engineering_lead: "opencode-go/kimi-k2.5"
-          frontend_dev: "opencode-go/minimax-m2.7"
-          backend_dev: "opencode-go/qwen3.6-plus"
+          engineering_lead: "z-ai/glm-5.1"
+          frontend_dev: "z-ai/glm-5.1"
+          backend_dev: "z-ai/glm-5.1"
     lead:
       name: engineering_lead
-      model: "opencode-go/qwen3.6-plus"  # default (overridden by instances)
+      model: "z-ai/glm-5.1"
       fallback_models:
-        - "z-ai/glm-5.1"
-        - "z-ai/glm-4.7-flashx"
+        - "z-ai/glm-4.7"
+        - "z-ai/glm-4.5-air"
       system_prompt: agents/engineering_lead.md
       expertise:
         - path: expertise/engineering_lead.md
@@ -102,40 +116,71 @@ teams:
         update: ["expertise/"]
     workers:
       - name: frontend_dev
-        model: "z-ai/glm-4.7-flashx"  # default (overridden by instances)
+        model: "z-ai/glm-5.1"
         fallback_models:
-          - "opencode-go/minimax-m2.7"
-          - "z-ai/glm-4.5-flash"     # FREE fallback
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
         system_prompt: agents/frontend_dev.md
         domain:
           read: ["."]
           update: ["frontend/", "src/components/", "src/styles/"]
       - name: backend_dev
-        model: "z-ai/glm-4.7-flashx"  # default (overridden by instances)
+        model: "z-ai/glm-5.1"
         fallback_models:
-          - "opencode-go/qwen3.6-plus"
-          - "z-ai/glm-4.5-flash"     # FREE fallback
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
         system_prompt: agents/backend_dev.md
         domain:
           read: ["."]
           update: ["backend/", "src/api/", "src/models/", "src/services/"]
       - name: browser_harness_agent
-        model: "z-ai/glm-4.7-flashx"
+        executor: claude-code
+        model: "anthropic/claude-sonnet-4-6"
         fallback_models:
-          - "opencode-go/qwen3.6-plus"
-          - "z-ai/glm-4.5-flash"
+          - "anthropic/claude-haiku-3-5"
         system_prompt: agents/browser_harness_agent.md
         only_instances: [engineering_A]
         domain:
           read: ["."]
           update: ["browser/", "e2e/", "tests/"]
+      - name: network_engineer
+        model: "z-ai/glm-5.1"
+        fallback_models:
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
+        system_prompt: agents/network_engineer.md
+        only_instances: [engineering_A]
+        domain:
+          read: ["."]
+          update: ["config/network/", "config/firewall/", "config/dns/", "infra/", "scripts/network/"]
+      - name: devops_engineer
+        model: "z-ai/glm-5.1"
+        fallback_models:
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
+        system_prompt: agents/devops_engineer.md
+        domain:
+          read: ["."]
+          update: [".github/workflows/", "deploy/", "infra/", "scripts/", "expertise/"]
+      - name: fullstack_engineer_claude
+        executor: claude-code
+        model: "anthropic/claude-sonnet-4-6"
+        fallback_models:
+          - "anthropic/claude-haiku-3-5"
+        system_prompt: agents/fullstack_engineer_claude.md
+        only_instances: [engineering_A]
+        domain:
+          read: ["."]
+          update: ["frontend/", "src/components/", "src/styles/", "backend/", "src/api/", "src/models/", "src/services/", "tests/"]
 
   - name: research
     color: cyan
     lead:
       name: research_lead
-      model: "opencode-go/kimi-k2.5"
-      fallback_models: ["z-ai/glm-5.1"]
+      model: "z-ai/glm-5.1"
+      fallback_models:
+        - "z-ai/glm-4.7"
+        - "z-ai/glm-4.5-air"
       system_prompt: agents/research_lead.md
       expertise:
         - path: expertise/research_lead.md
@@ -147,33 +192,52 @@ teams:
         - skills/conversational_response.md
         - skills/mental_model.md
         - skills/delegate.md
+        - skills/web_research.md
       domain:
         read: ["."]
         update: ["expertise/", "docs/", "research/"]
     workers:
       - name: deep_researcher
-        model: "z-ai/glm-4.7-flashx"
-        fallback_models: ["opencode-go/qwen3.6-plus"]
+        model: "z-ai/glm-5.1"
+        fallback_models:
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
         system_prompt: agents/deep_researcher.md
+        skills:
+          - skills/web_research.md
         domain:
           read: ["."]
           update: ["docs/", "research/"]
       - name: code_investigator
-        model: "z-ai/glm-4.7-flashx"
-        fallback_models: ["opencode-go/qwen3.6-plus"]
+        model: "z-ai/glm-5.1"
+        fallback_models:
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
         system_prompt: agents/code_investigator.md
         domain:
           read: ["."]
           update: ["expertise/", "docs/"]
+      - name: evaluation_analyst
+        model: "z-ai/glm-5.1"
+        fallback_models:
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
+        system_prompt: agents/evaluation_analyst.md
+        skills:
+          - skills/web_research.md
+          - skills/mental_model.md
+        domain:
+          read: ["."]
+          update: ["research/", "docs/", "expertise/"]
 
   - name: validation
     color: red
     lead:
       name: validation_lead
-      model: "opencode-go/mimo-v2-pro"
+      model: "z-ai/glm-5.1"
       fallback_models:
-        - "z-ai/glm-5.1"
-        - "z-ai/glm-4.7-flashx"
+        - "z-ai/glm-4.7"
+        - "z-ai/glm-4.5-air"
       system_prompt: agents/validation_lead.md
       expertise:
         - path: expertise/validation_lead.md
@@ -190,29 +254,42 @@ teams:
         update: ["expertise/"]
     workers:
       - name: qa_engineer
-        model: "z-ai/glm-4.7-flashx"
+        model: "z-ai/glm-5.1"
         fallback_models:
-          - "opencode-go/mimo-v2-pro"
-          - "z-ai/glm-4.5-flash"     # FREE fallback
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
         system_prompt: agents/qa_engineer.md
         domain:
           read: ["."]
           update: ["tests/", "expertise/"]
       - name: security_reviewer
-        model: "opencode-go/kimi-k2.5"
+        model: "z-ai/glm-5.1"
         fallback_models:
-          - "z-ai/glm-4.7-flashx"
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
         system_prompt: agents/security_reviewer.md
         domain:
           read: ["."]
           update: ["expertise/"]
       - name: visual_reviewer
-        model: "z-ai/glm-4.6v"
+        executor: claude-code
+        model: "anthropic/claude-sonnet-4-6"
         vision: true
+        fallback_models:
+          - "anthropic/claude-haiku-3-5"
         system_prompt: agents/visual_reviewer.md
         domain:
           read: ["."]
           update: ["expertise/"]
+      - name: performance_engineer
+        model: "z-ai/glm-5.1"
+        fallback_models:
+          - "z-ai/glm-4.7"
+          - "z-ai/glm-4.5-air"
+        system_prompt: agents/performance_engineer.md
+        domain:
+          read: ["."]
+          update: ["tests/perf/", "tests/load/", "expertise/"]
 
 # ── Reusable Command Workflows ────────────────────────────────────
 # Invoke with: <command_name>: <user input>

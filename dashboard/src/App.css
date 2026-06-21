@@ -1,0 +1,34 @@
+/* Mobile drawer transitions */
+.drawer-backdrop {
+  background: rgba(0, 0, 0, 0.5);
+  animation: fadeIn 0.15s ease-out;
+}
+
+.drawer-panel {
+  animation: slideInLeft 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* Ensure smooth scrolling on mobile */
+@media (max-width: 767px) {
+  .drawer-panel {
+    -webkit-overflow-scrolling: touch;
+  }
+}

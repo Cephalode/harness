@@ -38,6 +38,7 @@ class AgentConfig:
     fallback_models: list[str] = field(default_factory=list)
     vision: bool = False
     only_instances: list[str] = field(default_factory=list)  # empty = all instances
+    executor: str = "pi"  # "pi" (default) or "claude-code"
 
 
 @dataclass
@@ -115,6 +116,7 @@ def _parse_agent(data: dict[str, Any]) -> AgentConfig:
         fallback_models=data.get("fallback_models", []),
         vision=data.get("vision", False),
         only_instances=data.get("only_instances", []),
+        executor=data.get("executor", "pi"),
     )
 
 

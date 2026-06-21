@@ -184,12 +184,34 @@ class Agent:
         Args:
             message: The task/message for the agent.
             context: Additional context from delegation.
-            timeout: Max seconds to wait for PI response.
+            timeout: Max seconds to wait for the executor response.
             image_paths: Local file paths to images. Only passed to PI
                 when this agent has vision=true.
         """
         system_prompt = self._build_system_prompt()
         prompt = self._build_prompt(message, context)
+
+        # ── Claude Code executor ────────────────────────────────────
+        if self.config.executor == "claude-code":
+            if self.event_bus:
+                self.event_bus.emit(HarnessEvent(
+                    "agent_start",
+                    agent=self.name,
+                    team=self.team_name,
+                    data={"model": self.model, "executor": "claude-code", "message_length": len(message)},
+                ))
+            result = await self._execute_claude_code(system_prompt, prompt, timeout, image_paths=image_paths)
+            if self.event_bus:
+                status = "error" if result.get("error") else "success"
+                self.event_bus.emit(HarnessEvent(
+                    "agent_end",
+                    agent=self.name,
+                    team=self.team_name,
+                    data={"model": result.get("model", self.model), "executor": "claude-code", "status": status, "result_length": len(result.get("result", ""))},
+                ))
+            return result
+
+        # ── PI executor (default) ────────────────────────────────────
 
         # ── Slot allocation (rationing) ──────────────────────────────
         # If we have a slot allocator, use it to get the best available
@@ -454,6 +476,141 @@ class Agent:
             "usage": usage_data,
             "model": model_used,
             "provider": provider,
+        }
+
+        # Track cost
+        usage = parse_usage_from_pi_output(output)
+        self.cost_tracker.record(
+            agent_name=self.name,
+            team_name=self.team_name,
+            model=model_used,
+            usage=usage,
+        )
+
+        return output
+
+    async def _execute_claude_code(
+        self, system_prompt: str, prompt: str, timeout: int,
+        image_paths: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Execute Claude Code CLI (`claude -p`) and parse JSON output.
+
+        Claude Code manages its own API credentials and rate limiting,
+        so no slot allocation or rate limiter integration is needed.
+
+        Vision agents (self.config.vision=True) receive image file paths
+        and use a restricted tool set (Read only) with an explicit
+        vision-capable model.
+        """
+        # If images were provided, append their paths so Claude Code can
+        # view them via the Read tool (which handles images natively).
+        if image_paths:
+            existing_paths = [p for p in image_paths if os.path.isfile(p)]
+            if existing_paths:
+                prompt += "\n\nAttached image files: " + ", ".join(existing_paths)
+
+        # Build the claude command — prompt passed via -p flag, system
+        # prompt appended to preserve Claude Code's built-in capabilities.
+        if getattr(self.config, "vision", False):
+            allowed_tools = "Read"
+            cmd = [
+                "claude",
+                "-p", shlex.quote(prompt),
+                "--append-system-prompt", shlex.quote(system_prompt),
+                "--output-format", "json",
+                "--max-turns", "10",
+                "--model", "claude-sonnet-4-6",
+                "--allowedTools", allowed_tools,
+                "--dangerously-skip-permissions",
+            ]
+        else:
+            allowed_tools = "Read,Edit,Write,Bash"
+            cmd = [
+                "claude",
+                "-p", shlex.quote(prompt),
+                "--append-system-prompt", shlex.quote(system_prompt),
+                "--output-format", "json",
+                "--max-turns", "20",
+                "--allowedTools", allowed_tools,
+                "--dangerously-skip-permissions",
+            ]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self.base_dir,
+            )
+        except Exception as exc:
+            return {
+                "error": f"spawn failed: {exc}",
+                "result": f"Agent {self.name} failed to start: {exc}",
+                "usage": {},
+            }
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {
+                "error": "timeout",
+                "result": f"Agent {self.name} timed out after {timeout}s",
+                "usage": {},
+            }
+
+        stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
+
+        if proc.returncode != 0:
+            return {
+                "error": f"exit code {proc.returncode}",
+                "result": stderr_text or stdout_text or f"Agent {self.name} exited with code {proc.returncode}",
+                "usage": {},
+            }
+
+        # Parse Claude Code's JSON output (single JSON object)
+        try:
+            result_data = json.loads(stdout_text)
+        except json.JSONDecodeError:
+            return {
+                "error": "json_parse_error",
+                "result": stdout_text or stderr_text,
+                "usage": {},
+            }
+
+        result_text = result_data.get("result", "")
+
+        # Strip status blocks from result
+        if result_text:
+            result_text = STATUS_BLOCK_PATTERN.sub("", result_text).strip()
+
+        # Convert Claude Code usage to PI-compatible TokenUsage format
+        raw_usage = result_data.get("usage", {})
+        usage_dict = {
+            "input": raw_usage.get("input_tokens", 0),
+            "output": raw_usage.get("output_tokens", 0),
+            "cacheWrite": raw_usage.get("cache_creation_input_tokens", 0),
+            "cacheRead": raw_usage.get("cache_read_input_tokens", 0),
+        }
+
+        # Determine the model name from output (Claude Code may report
+        # the actual model it used, e.g. "claude-sonnet-4-6").
+        model_used = self.model
+        model_usage = result_data.get("modelUsage", {})
+        if model_usage:
+            # Pick the first key as the actual model used
+            model_used = next(iter(model_usage.keys()), self.model)
+
+        output = {
+            "result": result_text,
+            "usage": usage_dict,
+            "model": model_used,
+            "provider": "claude-code",
         }
 
         # Track cost

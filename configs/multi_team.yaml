@@ -84,6 +84,8 @@ teams:
           engineering_lead: "z-ai/glm-5.1"
           frontend_dev: "z-ai/glm-5.1"
           backend_dev: "z-ai/glm-5.1"
+          fullstack_engineer_claude: "anthropic/claude-sonnet-4-6"
+          browser_harness_agent: "anthropic/claude-sonnet-4-6"
       - name: engineering_B
         models:
           engineering_lead: "z-ai/glm-5.1"
@@ -132,10 +134,10 @@ teams:
           read: ["."]
           update: ["backend/", "src/api/", "src/models/", "src/services/"]
       - name: browser_harness_agent
-        model: "z-ai/glm-5.1"
+        executor: claude-code
+        model: "anthropic/claude-sonnet-4-6"
         fallback_models:
-          - "z-ai/glm-4.7"
-          - "z-ai/glm-4.5-air"
+          - "anthropic/claude-haiku-3-5"
         system_prompt: agents/browser_harness_agent.md
         only_instances: [engineering_A]
         domain:
@@ -160,6 +162,16 @@ teams:
         domain:
           read: ["."]
           update: [".github/workflows/", "deploy/", "infra/", "scripts/", "expertise/"]
+      - name: fullstack_engineer_claude
+        executor: claude-code
+        model: "anthropic/claude-sonnet-4-6"
+        fallback_models:
+          - "anthropic/claude-haiku-3-5"
+        system_prompt: agents/fullstack_engineer_claude.md
+        only_instances: [engineering_A]
+        domain:
+          read: ["."]
+          update: ["frontend/", "src/components/", "src/styles/", "backend/", "src/api/", "src/models/", "src/services/", "tests/"]
 
   - name: research
     color: cyan
@@ -260,10 +272,11 @@ teams:
           read: ["."]
           update: ["expertise/"]
       - name: visual_reviewer
-        model: "z-ai/glm-4.5v"
+        executor: claude-code
+        model: "anthropic/claude-sonnet-4-6"
         vision: true
         fallback_models:
-          - "z-ai/glm-4.5v"
+          - "anthropic/claude-haiku-3-5"
         system_prompt: agents/visual_reviewer.md
         domain:
           read: ["."]

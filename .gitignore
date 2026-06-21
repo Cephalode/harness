@@ -19,3 +19,6 @@ hello.txt
 
 # Compiled binaries
 tui/harness-tui
+
+# Dashboard runtime logs
+.logs/

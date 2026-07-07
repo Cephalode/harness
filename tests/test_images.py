@@ -7,9 +7,6 @@ from harness.images import (
     extract_image_refs,
     is_url,
     is_local_file,
-    strip_images_from_message,
-    encode_image_paths,
-    decode_image_paths,
     IMAGE_EXTENSIONS,
 )
 
@@ -103,69 +100,3 @@ class TestIsLocalFile:
         # Create a file and test with ~/path style (can't easily test without home setup)
         # Just test the negative case
         assert is_local_file("~/nonexistent_xyz/img.png") is False
-
-
-# ─── strip_images_from_message ────────────────────────────────
-
-class TestStripImagesFromMessage:
-    def test_strips_markdown_images(self):
-        msg = "Check ![alt text](https://example.com/img.png) for details"
-        stripped = strip_images_from_message(msg)
-        assert "alt text" in stripped
-        assert "https://example.com/img.png" not in stripped
-
-    def test_strips_bare_urls_on_own_line(self):
-        msg = "See this:\nhttps://example.com/img.png\nfor details"
-        stripped = strip_images_from_message(msg)
-        assert "https://example.com/img.png" not in stripped
-        assert "details" in stripped
-
-    def test_preserves_inline_urls(self):
-        # Bare URLs inline (not on own line) may or may not be stripped
-        # The regex uses ^ and $ anchors, so inline should be preserved
-        msg = "Visit https://example.com/img.png for reference"
-        stripped = strip_images_from_message(msg)
-        # Inline URLs are not stripped (regex anchors to line start/end)
-        assert "https://example.com" in stripped
-
-    def test_no_images_unchanged(self):
-        msg = "Just regular text"
-        assert strip_images_from_message(msg) == msg
-
-
-# ─── encode/decode image paths ────────────────────────────────
-
-class TestEncodeDecodeImagePaths:
-    def test_encode_single_path(self):
-        result = encode_image_paths(["/tmp/img.png"])
-        assert "<<IMAGE_PATHS:" in result
-        assert "/tmp/img.png" in result
-        assert result.endswith(">>")
-
-    def test_encode_multiple_paths(self):
-        result = encode_image_paths(["/tmp/a.png", "/tmp/b.jpg"])
-        assert "/tmp/a.png" in result
-        assert "/tmp/b.jpg" in result
-
-    def test_encode_empty(self):
-        assert encode_image_paths([]) == ""
-
-    def test_decode_single_path(self):
-        context = "Some text <<IMAGE_PATHS:/tmp/img.png>> more text"
-        paths = decode_image_paths(context)
-        assert paths == ["/tmp/img.png"]
-
-    def test_decode_multiple_paths(self):
-        context = "<<IMAGE_PATHS:/tmp/a.png,/tmp/b.jpg>>"
-        paths = decode_image_paths(context)
-        assert paths == ["/tmp/a.png", "/tmp/b.jpg"]
-
-    def test_decode_no_marker(self):
-        paths = decode_image_paths("No image paths here")
-        assert paths == []
-
-    def test_roundtrip(self):
-        original = ["/tmp/img1.png", "/tmp/img2.jpg"]
-        encoded = encode_image_paths(original)
-        decoded = decode_image_paths(encoded)
-        assert decoded == original

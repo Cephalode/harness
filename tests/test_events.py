@@ -173,7 +173,3 @@ class TestEventBus:
         bus.emit(event)
         assert len(received) == 1
         assert received[0].type == "listened"
-
-    def test_get_team_tree_default_empty(self):
-        bus = EventBus()
-        assert bus.get_team_tree() == {}

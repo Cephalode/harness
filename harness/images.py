@@ -30,9 +30,6 @@ IMAGE_PATTERNS = [
 # Supported image extensions (what PI CLI accepts)
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'}
 
-# Marker used in delegation context to pass image paths between agents
-IMAGE_PATHS_MARKER = "<<IMAGE_PATHS:"
-
 
 def extract_image_refs(message: str) -> list[str]:
     """Extract image URLs and local file paths from a message.
@@ -143,40 +140,6 @@ async def resolve_image_refs(
             logger.debug("Skipping unrecognized image ref: %s", ref[:80])
 
     return resolved
-
-
-def strip_images_from_message(message: str) -> str:
-    """Remove image markdown/URLs from message text, leaving just prose.
-
-    Used when passing the message to non-vision agents that don't need
-    the image clutter.
-    """
-    text = message
-    # Remove markdown images but keep alt text
-    text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', r'\1', text)
-    # Remove bare image URLs on their own line
-    text = re.sub(r'^\s*https?://\S+\.(?:png|jpg|jpeg|gif|webp|svg|bmp)\s*$', '', text, flags=re.I | re.MULTILINE)
-    return text.strip()
-
-
-def encode_image_paths(paths: list[str]) -> str:
-    """Encode image paths into a context string for delegation.
-
-    The visual_reviewer's delegation context carries a marker with the
-    local file paths so the team lead can forward them.
-    """
-    if not paths:
-        return ""
-    return f"{IMAGE_PATHS_MARKER}{','.join(paths)}>>"
-
-
-def decode_image_paths(context: str) -> list[str]:
-    """Decode image paths from a delegation context string."""
-    match = re.search(rf'{re.escape(IMAGE_PATHS_MARKER)}([^>]+)>>', context)
-    if not match:
-        return []
-    paths = match.group(1).split(',')
-    return [p for p in paths if p]
 
 
 def cleanup_temp_images(paths: list[str]) -> None:

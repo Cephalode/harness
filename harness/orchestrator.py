@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import TYPE_CHECKING, Any
 
 from .agent import Agent
 from .config import HarnessConfig, TeamConfig, TeamInstanceConfig
-from .delegate import DelegationTool
 from .events import EventBus, HarnessEvent
 from .images import (
     extract_image_refs,
     resolve_image_refs,
-    strip_images_from_message,
     cleanup_temp_images,
 )
 from .models import CostTracker
@@ -23,17 +20,6 @@ from .team import Team
 
 if TYPE_CHECKING:
     from .state import StateStore
-
-
-# Module-level patterns for detecting image references in user messages
-_IMAGE_PATTERNS = [
-    re.compile(r'!\[[^\]]*\]\([^)]+\)'),                                    # markdown images ![alt](url)
-    re.compile(r'https?://\S+\.(?:png|jpg|jpeg|gif|webp|svg|bmp)',          # bare image URLs
-               re.IGNORECASE),
-    re.compile(r'(?:^|\s)/?(?:\S+/)*\S+\.(?:png|jpg|jpeg|gif|webp|svg|bmp)',  # file paths
-               re.IGNORECASE),
-    re.compile(r'<img\s', re.IGNORECASE),                                   # HTML img tags
-]
 
 
 class Orchestrator:

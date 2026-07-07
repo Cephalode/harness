@@ -90,10 +90,6 @@ class EventBus:
         """Get events since a timestamp."""
         return [e for e in self._history if e.timestamp > since]
 
-    def get_team_tree(self) -> dict[str, Any]:
-        """Override point — dashboard server will populate from orchestrator."""
-        return {}
-
 
 class DashboardRelay:
     """Forwards events from a local EventBus to the dashboard server via HTTP.

@@ -8,7 +8,6 @@ from typing import Any
 
 from .agent import Agent
 from .config import TeamConfig
-from .delegate import DelegationTool
 from .events import EventBus, HarnessEvent
 from .models import CostTracker
 from .rate_limiter import ConcurrencyLimiter, SlotAllocator
@@ -96,11 +95,6 @@ class Team:
         # Inject delegation context into lead agent so it knows its available workers
         if self.workers:
             self.lead.set_available_workers(list(self.workers.keys()))
-
-        # Build delegation tool with all team members
-        all_agents: dict[str, Agent] = {config.lead.name: self.lead}
-        all_agents.update(self.workers)
-        self.delegation_tool = DelegationTool(all_agents)
 
     @property
     def worker_names(self) -> list[str]:

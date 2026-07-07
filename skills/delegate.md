@@ -6,12 +6,12 @@ How to effectively delegate tasks to other agents in the system.
 
 The harness uses a **slot rationing system** — every agent must acquire an LLM slot before it can run. Slots are limited per model:
 
-- **Strong models** (e.g., `glm-5.1`, `kimi-k2.5`) have very few concurrent slots (often just 1)
-- **Weaker models** (e.g., `glm-4.7-flashx`, `glm-4.5-flash`) have more slots available
+- **Flagship** (`glm-5.1`): ~10 concurrent slots, shared across all teams
+- **Weaker fallback models** (`glm-4.7`, `glm-4.5-air`): fewer slots (2–5)
 
 If no slot is available on the requested model, the system automatically **degrades** the agent to a weaker model that has capacity. This means:
 
-- **Be intentional about parallel delegation.** Each parallel worker consumes a slot. If you delegate 3 workers at once and the strong models only have 1 slot each, some workers will run on degraded (weaker) models.
+- **Be intentional about parallel delegation.** Each parallel worker consumes a slot from the shared flagship pool. If you delegate many workers at once and the pool is exhausted, some will run on degraded (weaker) models.
 - **Prioritize your delegation.** For tasks where quality matters most, delegate sequentially so the best model is available. For independent tasks where speed matters more, parallel delegation is fine — some workers may run on slightly weaker models.
 - **Fewer, better delegations beat many parallel ones.** A single well-scoped task to one worker on a strong model will produce better results than splitting it across 3 workers where 2 get degraded.
 

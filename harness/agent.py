@@ -135,7 +135,7 @@ class Agent:
                 f"Your available workers:\n{workers_list}\n\n"
                 "### Slot Rationing\n\n"
                 "**Each worker you delegate to consumes an LLM slot.** Slots are limited — "
-                "strong models (glm-5.1, kimi-k2.5) often have only 1 concurrent slot. "
+                "the flagship pool (glm-5.1) is ~10 slots shared across all teams. "
                 "If you delegate too many workers in parallel, some will be degraded to weaker models automatically.\n\n"
                 "**Guidelines:**\n"
                 "- Prefer fewer, well-scoped delegations over many parallel ones\n"

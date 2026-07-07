@@ -13,7 +13,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from starlette.responses import StreamingResponse
 
 from .config import load_config, validate_config
 from .events import EventBus, HarnessEvent
@@ -338,30 +337,6 @@ def create_app(config_path: str = "configs/multi_team.yaml") -> FastAPI:
     async def set_state_agent(name: str, status: str = "running") -> dict[str, Any]:
         await state_store.set_agent_status(name, status)
         return {"ok": True}
-
-    # --- SSE endpoint for real-time state streaming ---
-
-    @app.get("/api/state/events/stream")
-    async def state_event_stream():
-        """SSE endpoint for real-time state streaming."""
-        async def event_generator():
-            queue = event_bus.subscribe()
-            try:
-                # Send initial snapshot
-                snapshot = await state_store.snapshot()
-                yield f"data: {json.dumps({'type': 'init', 'data': snapshot}, ensure_ascii=False)}\n\n"
-                # Stream events
-                while True:
-                    try:
-                        event = await asyncio.wait_for(queue.get(), timeout=30)
-                        yield f"data: {event.to_json()}\n\n"
-                    except asyncio.TimeoutError:
-                        yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-            except GeneratorExit:
-                pass
-            finally:
-                event_bus.unsubscribe(queue)
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:

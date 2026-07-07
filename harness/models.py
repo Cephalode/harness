@@ -167,7 +167,3 @@ def parse_usage_from_pi_output(output: dict[str, Any]) -> TokenUsage:
         usage.cache_creation_input_tokens = raw_usage.get("cacheWrite", 0)
         usage.cache_read_input_tokens = raw_usage.get("cacheRead", 0)
     return usage
-
-
-# Backward compat alias
-parse_usage_from_claude_output = parse_usage_from_pi_output
